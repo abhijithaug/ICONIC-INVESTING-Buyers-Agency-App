@@ -1,0 +1,8 @@
+{
+  "name": "Iconic Investing Client App",
+  "description": "Iconic Investing Client App - Role-based buyers agency platform featuring Admin & Client login portals with JWT session management, private investor dashboards, property shortlisting, document vault, AI B&P analysis, and settlement management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
