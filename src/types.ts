@@ -65,21 +65,36 @@ export interface ClientDocument {
   status: 'Verified' | 'Pending Review' | 'Under Review' | 'Archived';
   downloadUrl?: string;
   notes?: string;
-  // Microsoft OneDrive for Business Graph API synchronization metadata
+  // Microsoft Azure / OneDrive for Business synchronization metadata
   oneDriveSyncStatus?: 'synced' | 'pending' | 'failed' | 'simulated';
   oneDrivePath?: string;
   oneDriveUrl?: string;
   oneDriveId?: string;
   oneDriveSyncedAt?: string;
   oneDriveError?: string;
+  // Google Drive API synchronization metadata (legacy/compat)
+  gdriveSyncStatus?: 'synced' | 'pending' | 'failed' | 'simulated';
+  gdrivePath?: string;
+  gdriveUrl?: string;
+  gdriveId?: string;
+  gdriveSyncedAt?: string;
+  gdriveError?: string;
 }
 
 export interface OneDriveSyncSummary {
   totalDocuments: number;
   syncedToOneDrive: number;
-  tenantId: string;
   userEmail: string;
+  tenantId: string;
   basePath: string;
+  lastSyncedAt?: string;
+}
+
+export interface GoogleDriveSyncSummary {
+  totalDocuments: number;
+  syncedToGoogleDrive: number;
+  accountEmail: string;
+  rootFolderId: string;
   lastSyncedAt?: string;
 }
 

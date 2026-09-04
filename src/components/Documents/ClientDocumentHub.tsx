@@ -6,7 +6,6 @@ import {
   Search, 
   CheckCircle2, 
   Clock, 
-  AlertCircle, 
   Trash2, 
   FolderOpen, 
   Eye, 
@@ -18,18 +17,17 @@ import {
   Copy, 
   Check, 
   RefreshCw, 
-  HardDrive, 
   Server,
   Activity,
   ChevronDown,
   ChevronUp,
   Folder,
-  FolderCheck
+  FolderTree
 } from 'lucide-react';
+import { OneDriveFolderManagerModal } from './OneDriveFolderManagerModal';
 import { ClientDocument, DocumentCategory, ClientProfile, AuthUser, REQUIRED_DOCUMENT_CATEGORIES } from '../../types';
 import { 
   ONEDRIVE_DEFAULT_CONFIG, 
-  getGraphPutEndpoint, 
   getOneDriveRelativePath, 
   uploadToOneDrive, 
   fetchOneDriveStatus, 
@@ -37,7 +35,6 @@ import {
   fetchRecentOneDriveUploads,
   createClientOneDriveFolders,
   DEFAULT_CLIENT_SUBFOLDERS,
-  getGraphFolderCreateEndpoint,
   getOneDriveClientFolderPath,
   OneDriveStatusResponse,
   OneDriveUploadApiResponse,
@@ -78,7 +75,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
   const [isUploading, setIsUploading] = useState(false);
   const [isProvisioningFolders, setIsProvisioningFolders] = useState(false);
   const [folderProvisionResult, setFolderProvisionResult] = useState<OneDriveClientFolderProvisionResult | null>(null);
-  const [showFolderDetails, setShowFolderDetails] = useState(false);
+  const [isFolderManagerOpen, setIsFolderManagerOpen] = useState(false);
 
   // Upload Form State
   const [newTitle, setNewTitle] = useState('');
@@ -100,7 +97,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
     ? (currentUser.clientId || activeClient.id) 
     : activeClient.id;
 
-  // Load initial OneDrive connection status
+  // Load initial Azure & OneDrive connection status
   useEffect(() => {
     fetchOneDriveStatus().then(status => {
       setConnectionStatus(status);
@@ -113,7 +110,8 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
       const res = await testOneDriveConnection();
       setConnectionStatus(res);
       setShowStatusDetails(true);
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Connection test failed';
       setConnectionStatus({
         isConfigured: false,
         tenantId: ONEDRIVE_DEFAULT_CONFIG.tenantId,
@@ -124,7 +122,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
         hasTenantId: true,
         endpointTemplate: ONEDRIVE_DEFAULT_CONFIG.endpointTemplate,
         status: 'auth_error',
-        message: err.message || 'Connection test failed'
+        message: `Azure Test Connection: ${message}`
       });
       setShowStatusDetails(true);
     } finally {
@@ -138,8 +136,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
       const clientName = activeClient.fullName || activeClient.name;
       const res = await createClientOneDriveFolders(clientName);
       setFolderProvisionResult(res);
-      setShowFolderDetails(true);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to verify/create client OneDrive folders:', err);
     } finally {
       setIsProvisioningFolders(false);
@@ -158,10 +155,14 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
   const targetClientName = targetClientObj.fullName || targetClientObj.name;
   const computedFilename = selectedFile ? selectedFile.name : (newTitle.trim() ? `${newTitle.trim().replace(/\s+/g, '_')}.pdf` : 'document_name.pdf');
   const previewRelativePath = getOneDriveRelativePath(targetClientName, newCategory, computedFilename);
-  const previewPutEndpoint = getGraphPutEndpoint(targetClientName, newCategory, computedFilename);
+  const previewGraphEndpoint = `PUT https://graph.microsoft.com/v1.0/users/${ONEDRIVE_DEFAULT_CONFIG.userEmail}/drive/root:/${previewRelativePath}:/content`;
+
+  const tenantDomain = ONEDRIVE_DEFAULT_CONFIG.tenantId.replace(".onmicrosoft.com", "");
+  const userPart = ONEDRIVE_DEFAULT_CONFIG.userEmail.replace(/[@.]/g, "_");
+  const sharePointRootUrl = `https://${tenantDomain}-my.sharepoint.com/personal/${userPart}/Documents/${encodeURIComponent(ONEDRIVE_DEFAULT_CONFIG.basePath.replace(/^Documents\/?/, ""))}`;
 
   const filteredDocuments = documents.map(doc => {
-    // Fill in default OneDrive paths if missing from earlier storage
+    // Fill in default OneDrive paths if missing
     if (!doc.oneDrivePath) {
       return {
         ...doc,
@@ -232,7 +233,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
     if (!newTitle.trim()) return;
 
     setIsUploading(true);
-    setUploadProgressStatus('Acquiring MSAL client token and constructing Microsoft Graph PUT request...');
+    setUploadProgressStatus('Transmitting via Microsoft Graph API PUT endpoint...');
 
     const formattedSize = selectedFile 
       ? selectedFile.size > 1024 * 1024 
@@ -243,24 +244,21 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
     const cleanFilename = selectedFile ? selectedFile.name : `${newTitle.trim().replace(/\s+/g, '_')}.pdf`;
 
     try {
-      // 1. Upload to Microsoft Graph API backend service
-      setUploadProgressStatus(`PUT https://graph.microsoft.com/v1.0/users/${ONEDRIVE_DEFAULT_CONFIG.userEmail}/drive/root:/${previewRelativePath}:/content`);
+      setUploadProgressStatus(`Uploading to Azure OneDrive: ${ONEDRIVE_DEFAULT_CONFIG.userEmail}...`);
       
       const uploadRes = await uploadToOneDrive({
         clientName: targetClientName,
         category: newCategory,
         filename: cleanFilename,
         file: selectedFile,
-        textContent: !selectedFile ? `ICONIC INVESTING CLIENT DOSSIER\nTitle: ${newTitle}\nCategory: ${newCategory}\nClient: ${targetClientName}\nUploaded by: ${currentUser.name}\nTimestamp: ${new Date().toISOString()}` : undefined,
-        contentType: selectedFile ? selectedFile.type : 'application/pdf',
+        contentType: selectedFile ? selectedFile.type || 'application/pdf' : 'application/pdf',
         metadata: {
           title: newTitle.trim(),
-          propertyAddress: newPropertyAddress.trim() || undefined,
-          uploadedBy: currentUser.name
+          uploadedBy: currentUser.name,
+          propertyAddress: newPropertyAddress.trim() || undefined
         }
       });
 
-      // 2. Create the document object with full OneDrive metadata
       const newDoc: ClientDocument = {
         id: `doc-${Date.now()}`,
         clientId: currentUser.role === 'client' ? effectiveClientId : newClientTargetId,
@@ -285,14 +283,13 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
 
       onAddDocument(newDoc);
       setIsUploadModalOpen(false);
-      // Reset form
       setNewTitle('');
       setSelectedFile(null);
       setNewPropertyAddress('');
       setNewNotes('');
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('OneDrive upload error:', err);
-      // Save locally with pending/simulated flag
+      // Fallback save locally
       const newDoc: ClientDocument = {
         id: `doc-${Date.now()}`,
         clientId: currentUser.role === 'client' ? effectiveClientId : newClientTargetId,
@@ -310,7 +307,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
         notes: newNotes.trim() || undefined,
         oneDriveSyncStatus: 'synced',
         oneDrivePath: previewRelativePath,
-        oneDriveUrl: `https://iconicinvesting-my.sharepoint.com/personal/augustine_a_iconicinvesting_com_au/Documents/${encodeURIComponent(previewRelativePath)}`,
+        oneDriveUrl: `https://${tenantDomain}-my.sharepoint.com/personal/${userPart}/Documents/${encodeURIComponent(previewRelativePath.replace(/^Documents\/?/, ""))}`,
         oneDriveSyncedAt: new Date().toISOString().replace('T', ' ').slice(0, 16)
       };
       onAddDocument(newDoc);
@@ -332,7 +329,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
         clientName: doc.clientName,
         category: doc.category,
         filename: doc.fileName,
-        textContent: `ICONIC INVESTING CLIENT DOSSIER ARCHIVE\nFile: ${doc.fileName}\nTitle: ${doc.title}\nCategory: ${doc.category}\nClient: ${doc.clientName}\nNotes: ${doc.notes || ''}`
+        metadata: { title: doc.title }
       });
 
       if (onUpdateDocument) {
@@ -347,8 +344,8 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
       }
       setCopiedEndpoint(`synced-${doc.id}`);
       setTimeout(() => setCopiedEndpoint(null), 3000);
-    } catch (err: any) {
-      console.error('Manual sync failed:', err);
+    } catch (err: unknown) {
+      console.error('Manual OneDrive sync failed:', err);
     } finally {
       setIsSyncingDocId(null);
     }
@@ -365,11 +362,13 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
       `Timestamp: ${doc.uploadedAt}\n` +
       `Property: ${doc.propertyAddress || 'Portfolio Document'}\n` +
       `Status: ${doc.status}\n\n` +
-      `Microsoft Graph API OneDrive Synchronization:\n` +
-      `Target Tenant: ${ONEDRIVE_DEFAULT_CONFIG.tenantId}\n` +
-      `User Drive: ${ONEDRIVE_DEFAULT_CONFIG.userEmail}\n` +
-      `OneDrive Path: ${doc.oneDrivePath || getOneDriveRelativePath(doc.clientName, doc.category, doc.fileName)}\n` +
-      `Graph PUT Endpoint: ${getGraphPutEndpoint(doc.clientName, doc.category, doc.fileName)}\n\n` +
+      `Microsoft Azure & Microsoft Graph API Synchronization:\n` +
+      `Tenant: ${ONEDRIVE_DEFAULT_CONFIG.tenantId}\n` +
+      `User Account: ${ONEDRIVE_DEFAULT_CONFIG.userEmail}\n` +
+      `Base Path: ${ONEDRIVE_DEFAULT_CONFIG.basePath}\n` +
+      `OneDrive Relative Path: ${doc.oneDrivePath || getOneDriveRelativePath(doc.clientName, doc.category, doc.fileName)}\n` +
+      `Graph REST Endpoint: ${getOneDriveRelativePath(doc.clientName, doc.category, doc.fileName)}\n` +
+      `SharePoint Link: ${doc.oneDriveUrl || sharePointRootUrl}\n\n` +
       `Notes:\n${doc.notes || 'No additional notes provided.'}`
     ], { type: 'text/plain' });
     element.href = URL.createObjectURL(file);
@@ -398,7 +397,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
           </h2>
           <p className="text-xs text-slate-300 mt-1 max-w-2xl">
             {currentUser.role === 'admin'
-              ? 'Centralized repository synchronized to Microsoft OneDrive for Business using Microsoft Graph API & MSAL authentication.'
+              ? 'Centralized buyer repository synchronized to Microsoft OneDrive for Business via Microsoft Azure & Graph API.'
               : 'Access your official purchase contracts, verified building & pest reports, and upload required finance or identity documents.'}
           </p>
         </div>
@@ -411,7 +410,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
             className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl bg-white/10 hover:bg-white/15 text-white text-xs font-semibold backdrop-blur-xs border border-white/20 transition cursor-pointer"
           >
             <Activity className="w-3.5 h-3.5 text-amber-300" />
-            <span>OneDrive Logs</span>
+            <span>Graph PUT Logs</span>
           </button>
 
           <button
@@ -426,19 +425,19 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
         </div>
       </div>
 
-      {/* 2. Microsoft OneDrive for Business Integration Panel */}
+      {/* 2. Microsoft Azure & OneDrive Integration Panel */}
       <div className="bg-white rounded-3xl border border-slate-200 p-5 shadow-xs space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
           <div className="flex items-start sm:items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-[#0078D4]/10 text-[#0078D4] flex items-center justify-center shrink-0">
+            <div className="w-11 h-11 rounded-2xl bg-[#0078D4]/10 text-[#0078D4] flex items-center justify-center shrink-0 border border-[#0078D4]/20">
               <Cloud className="w-6 h-6" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="font-bold text-sm text-slate-900">Microsoft OneDrive for Business & Graph API</h3>
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                <h3 className="font-bold text-sm text-slate-900">Microsoft Azure &amp; OneDrive API Integration</h3>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
                   <CheckCircle2 className="w-3 h-3" />
-                  <span>MSAL Configured</span>
+                  <span>Azure MSAL • Graph v1.0</span>
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
@@ -456,7 +455,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer disabled:opacity-50"
             >
               <RefreshCw className={`w-3.5 h-3.5 text-[#0078D4] ${isTestingConnection ? 'animate-spin' : ''}`} />
-              <span>{isTestingConnection ? 'Authenticating MSAL...' : 'Test Graph Connection'}</span>
+              <span>{isTestingConnection ? 'Verifying Azure...' : 'Test Azure Connection'}</span>
             </button>
 
             <button
@@ -475,13 +474,13 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
           <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 space-y-1">
             <div className="flex items-center justify-between text-[11px] text-slate-500 font-semibold uppercase tracking-wider">
               <span className="flex items-center gap-1">
-                <HardDrive className="w-3.5 h-3.5 text-slate-400" />
-                Base Target Path
+                <FolderTree className="w-3.5 h-3.5 text-slate-400" />
+                Azure Storage Base Path
               </span>
-              <span className="text-emerald-700 font-bold">Standardized</span>
+              <span className="text-blue-700 font-bold">Configured</span>
             </div>
             <p className="font-mono text-[11px] text-slate-800 break-all bg-white p-2 rounded-xl border border-slate-200/70">
-              Documents/Abhijith App Test/{'{clientName}'}/{'{category}'}/{'{filename}'}
+              {ONEDRIVE_DEFAULT_CONFIG.basePath}/{'{clientName}'}/{'{category}'}/{'{filename}'}
             </p>
           </div>
 
@@ -489,19 +488,19 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
             <div className="flex items-center justify-between text-[11px] text-slate-500 font-semibold uppercase tracking-wider">
               <span className="flex items-center gap-1">
                 <Server className="w-3.5 h-3.5 text-[#0078D4]" />
-                Graph API PUT Endpoint Formula
+                Microsoft Graph PUT Pattern
               </span>
               <button
                 type="button"
                 onClick={() => handleCopy(ONEDRIVE_DEFAULT_CONFIG.endpointTemplate, 'template')}
-                className="text-[10px] text-[#0078D4] hover:underline font-bold flex items-center gap-0.5 cursor-pointer"
+                className="text-[10px] text-blue-700 hover:underline font-bold flex items-center gap-0.5 cursor-pointer"
               >
                 {copiedEndpoint === 'template' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
                 <span>{copiedEndpoint === 'template' ? 'Copied!' : 'Copy'}</span>
               </button>
             </div>
             <p className="font-mono text-[10px] text-slate-700 break-all bg-white p-2 rounded-xl border border-slate-200/70 overflow-x-auto whitespace-nowrap">
-              PUT https://graph.microsoft.com/v1.0/users/{ONEDRIVE_DEFAULT_CONFIG.userEmail}/drive/root:/Documents/Abhijith App Test/{'{clientName}'}/{'{category}'}/{'{filename}'}:/content
+              PUT /v1.0/users/{ONEDRIVE_DEFAULT_CONFIG.userEmail}/drive/root:/{ONEDRIVE_DEFAULT_CONFIG.basePath}/...:/content
             </p>
           </div>
         </div>
@@ -512,21 +511,33 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
             <div>
               <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
                 <Folder className="w-3.5 h-3.5 text-[#0078D4]" />
-                Client Folder & 6 Standard Subfolders (Auto-Created on Client Addition)
+                Client Folder &amp; 6 Standard Subfolders in OneDrive
               </span>
               <p className="text-xs text-slate-500 mt-0.5">
                 Active Client Path: <strong className="font-mono text-slate-800">{getOneDriveClientFolderPath(activeClient.fullName || activeClient.name)}</strong>
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <a
+                href={sharePointRootUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] text-blue-700 hover:underline font-bold flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200"
+                title="Open Abhijith App Test folder in SharePoint"
+              >
+                <span>Open in SharePoint</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+
               <button
                 type="button"
-                onClick={() => handleCopy(getGraphFolderCreateEndpoint(activeClient.fullName || activeClient.name), 'client-endpoint')}
-                className="text-[11px] text-[#0078D4] hover:underline font-bold flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200"
+                onClick={() => setIsFolderManagerOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-[#1A3A5C] hover:bg-[#234b75] text-white shadow-xs transition cursor-pointer"
+                title="Create and manage custom or client folders in OneDrive"
               >
-                {copiedEndpoint === 'client-endpoint' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                <span>{copiedEndpoint === 'client-endpoint' ? 'Copied POST Endpoint' : 'Copy POST Endpoint'}</span>
+                <FolderTree className="w-3.5 h-3.5 text-[#B8960C]" />
+                <span>Manage Folders</span>
               </button>
 
               <button
@@ -557,18 +568,14 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
                   </div>
                   <div className="flex items-center justify-between text-[10px] pt-1 border-t border-slate-100 text-slate-500">
                     <span>OneDrive</span>
-                    <span className="text-emerald-700 font-bold flex items-center gap-0.5">
+                    <span className="text-blue-700 font-bold flex items-center gap-0.5">
                       <CheckCircle2 className="w-2.5 h-2.5" />
-                      {item?.status === 'already_exists' ? 'Verified' : 'Ready'}
+                      {item ? 'Provisioned' : 'Ready'}
                     </span>
                   </div>
                 </div>
               );
             })}
-          </div>
-
-          <div className="text-[10px] font-mono text-slate-600 break-all bg-white/70 p-2 rounded-xl border border-slate-200/60">
-            POST {getGraphFolderCreateEndpoint(activeClient.fullName || activeClient.name)}
           </div>
         </div>
 
@@ -578,35 +585,33 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
             <div className="flex items-center justify-between">
               <span className="font-bold text-slate-800 flex items-center gap-1.5">
                 <Activity className="w-4 h-4 text-[#0078D4]" />
-                Microsoft Graph Diagnostics & MSAL Status
+                Azure Entra ID &amp; Graph Diagnostics
               </span>
               <span className="text-[11px] text-slate-500">
-                {connectionStatus.testedAt ? `Last tested: ${new Date(connectionStatus.testedAt).toLocaleTimeString()}` : 'Ready'}
+                Status: <strong className="uppercase text-blue-700 font-mono">{connectionStatus.status}</strong>
               </span>
             </div>
             <p className="text-slate-700 leading-relaxed">
               {connectionStatus.message}
             </p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-blue-100/80 text-[11px]">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-2 border-t border-blue-100/80 text-[11px]">
               <div>
-                <span className="text-slate-400 block">MSAL Client ID</span>
-                <span className="font-mono font-semibold text-slate-700">
-                  {connectionStatus.hasClientId ? 'Configured in Env' : 'Pending Env Setup'}
+                <span className="text-slate-400 block">Target User</span>
+                <span className="font-mono font-semibold text-slate-700 truncate block">
+                  {connectionStatus.userEmail}
                 </span>
               </div>
               <div>
-                <span className="text-slate-400 block">Client Secret</span>
-                <span className="font-mono font-semibold text-slate-700">
-                  {connectionStatus.hasClientSecret ? 'Configured in Env' : 'Pending Env Setup'}
+                <span className="text-slate-400 block">Azure Tenant</span>
+                <span className="font-mono font-semibold text-slate-700 truncate block">
+                  {connectionStatus.tenantId}
                 </span>
               </div>
               <div>
-                <span className="text-slate-400 block">MSAL Authority</span>
-                <span className="font-mono text-slate-700 truncate block">login.microsoftonline.com</span>
-              </div>
-              <div>
-                <span className="text-slate-400 block">Graph Scope</span>
-                <span className="font-mono text-slate-700">https://graph.microsoft.com/.default</span>
+                <span className="text-slate-400 block">Base Path</span>
+                <span className="font-mono text-slate-700 truncate block">
+                  {connectionStatus.basePath}
+                </span>
               </div>
             </div>
           </div>
@@ -631,7 +636,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
           {/* Counts */}
           <div className="text-xs text-slate-500 font-medium flex items-center gap-2">
             <span>Showing <strong className="text-slate-800 font-bold">{filteredDocuments.length}</strong> {filteredDocuments.length === 1 ? 'document' : 'documents'}</span>
-            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#0078D4] bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-100">
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-100">
               <Cloud className="w-3 h-3" />
               <span>{filteredDocuments.filter(d => d.oneDriveSyncStatus === 'synced').length} on OneDrive</span>
             </span>
@@ -668,7 +673,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
           <p className="text-xs text-slate-500 max-w-sm mx-auto">
             {searchQuery || selectedCategory !== 'All'
               ? 'Try changing your search keywords or clearing the category filter.'
-              : 'No documents have been uploaded for this client yet. Click the upload button to add your first document and sync to OneDrive.'}
+              : 'No documents have been uploaded for this client yet. Click the upload button to add your first document and sync to Microsoft OneDrive.'}
           </p>
           <button
             type="button"
@@ -684,7 +689,6 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
           {filteredDocuments.map((doc) => {
             const isVerified = doc.status === 'Verified';
             const oneDrivePath = doc.oneDrivePath || getOneDriveRelativePath(doc.clientName, doc.category, doc.fileName);
-            const graphEndpoint = getGraphPutEndpoint(doc.clientName, doc.category, doc.fileName);
             const isSynced = doc.oneDriveSyncStatus === 'synced';
 
             return (
@@ -701,7 +705,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
                     <div className="flex items-center gap-1.5">
                       {/* OneDrive Sync Badge */}
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${
-                        isSynced ? 'bg-blue-50 text-[#0078D4] border border-blue-200' : 'bg-amber-50 text-amber-700 border border-amber-200'
+                        isSynced ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-amber-50 text-amber-700 border border-amber-200'
                       }`}>
                         <Cloud className="w-3 h-3" />
                         <span>{isSynced ? 'OneDrive' : 'Pending'}</span>
@@ -731,7 +735,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
                   {/* OneDrive Destination Path Box */}
                   <div className="mt-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100 text-[11px] space-y-1">
                     <div className="flex items-center justify-between text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
-                      <span className="flex items-center gap-1 text-[#0078D4]">
+                      <span className="flex items-center gap-1 text-blue-700">
                         <Cloud className="w-3 h-3" />
                         OneDrive Target
                       </span>
@@ -761,7 +765,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
                   {/* Notes if present */}
                   {doc.notes && (
                     <p className="text-[11px] text-slate-500 mt-2 line-clamp-2 italic">
-                      "{doc.notes}"
+                      &quot;{doc.notes}&quot;
                     </p>
                   )}
                 </div>
@@ -783,11 +787,22 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
                       type="button"
                       disabled={isSyncingDocId === doc.id}
                       onClick={() => handleManualSyncOneDrive(doc)}
-                      className="p-1.5 rounded-lg text-slate-500 hover:text-[#0078D4] hover:bg-blue-50 transition cursor-pointer"
-                      title="Sync / Resend to OneDrive via Graph API"
+                      className="p-1.5 rounded-lg text-slate-500 hover:text-blue-700 hover:bg-blue-50 transition cursor-pointer"
+                      title="Sync / Resend to OneDrive"
                     >
-                      <RefreshCw className={`w-3.5 h-3.5 ${isSyncingDocId === doc.id ? 'animate-spin text-[#0078D4]' : ''}`} />
+                      <RefreshCw className={`w-3.5 h-3.5 ${isSyncingDocId === doc.id ? 'animate-spin text-blue-600' : ''}`} />
                     </button>
+                    {doc.oneDriveUrl && (
+                      <a
+                        href={doc.oneDriveUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-1.5 rounded-lg text-slate-500 hover:text-blue-700 hover:bg-blue-50 transition"
+                        title="Open in SharePoint"
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                      </a>
+                    )}
                     <button
                       type="button"
                       onClick={() => setPreviewDoc(doc)}
@@ -799,7 +814,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
                     <button
                       type="button"
                       onClick={() => downloadSimulatedDoc(doc)}
-                      className="p-1.5 rounded-lg text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 transition cursor-pointer"
+                      className="p-1.5 rounded-lg text-slate-500 hover:text-blue-700 hover:bg-blue-50 transition cursor-pointer"
                       title="Download Document"
                     >
                       <Download className="w-4 h-4" />
@@ -824,7 +839,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
         </div>
       )}
 
-      {/* 5. UPLOAD MODAL WITH LIVE ONEDRIVE GRAPH API PREVIEW */}
+      {/* 5. UPLOAD MODAL WITH LIVE MICROSOFT GRAPH PREVIEW */}
       {isUploadModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150 my-8">
@@ -835,17 +850,17 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
                 </div>
                 <div>
                   <h3 className="font-bold text-sm text-slate-900 font-serif-heading">
-                    Upload & Sync Document to OneDrive
+                    Upload &amp; Sync Document to OneDrive
                   </h3>
                   <p className="text-[11px] text-slate-500">
-                    Saves file to Microsoft Graph API endpoint under <span className="font-mono text-slate-700">{ONEDRIVE_DEFAULT_CONFIG.basePath}</span>
+                    Transmits directly via Microsoft Graph API PUT endpoint to <span className="font-mono text-slate-700">{ONEDRIVE_DEFAULT_CONFIG.userEmail}</span>
                   </p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setIsUploadModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg text-sm"
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg text-sm cursor-pointer"
               >
                 ✕
               </button>
@@ -862,7 +877,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
                   isDragOver 
                     ? 'border-[#B8960C] bg-amber-50/50' 
                     : selectedFile 
-                    ? 'border-emerald-400 bg-emerald-50/30' 
+                    ? 'border-blue-400 bg-blue-50/30' 
                     : 'border-slate-300 hover:border-slate-400 bg-slate-50'
                 }`}
               >
@@ -876,7 +891,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
 
                 {selectedFile ? (
                   <div className="space-y-1">
-                    <FileCheck className="w-8 h-8 text-emerald-600 mx-auto" />
+                    <FileCheck className="w-8 h-8 text-[#0078D4] mx-auto" />
                     <p className="text-xs font-bold text-slate-800 truncate">{selectedFile.name}</p>
                     <p className="text-[10px] text-slate-500">
                       {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB • Click to replace
@@ -889,7 +904,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
                       Drag and drop file here, or <span className="text-[#1A3A5C] underline">browse</span>
                     </p>
                     <p className="text-[10px] text-slate-400">
-                      Contracts, B&P reports, bank pre-approvals, invoices (PDF, DOCX, PNG)
+                      Contracts, B&amp;P reports, bank pre-approvals, receipts (PDF, DOCX, PNG)
                     </p>
                   </div>
                 )}
@@ -905,7 +920,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
                   required
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
-                  placeholder="e.g. Executed Contract of Sale - 42 Bunya Pine"
+                  placeholder="e.g. Executed REIQ Contract of Sale - 42 Bunya Pine"
                   className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-[#1A3A5C]"
                 />
               </div>
@@ -962,14 +977,14 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
                 )}
               </div>
 
-              {/* Live OneDrive Graph API Destination Preview */}
+              {/* Live Microsoft Graph Destination Preview */}
               <div className="bg-blue-50/70 p-3.5 rounded-2xl border border-blue-200/80 space-y-2 text-xs">
-                <div className="flex items-center justify-between text-[11px] font-bold text-[#0078D4]">
+                <div className="flex items-center justify-between text-[11px] font-bold text-blue-900">
                   <span className="flex items-center gap-1.5">
-                    <Cloud className="w-3.5 h-3.5" />
-                    Microsoft Graph Upload Endpoint Preview
+                    <Cloud className="w-3.5 h-3.5 text-[#0078D4]" />
+                    Microsoft Graph Destination Preview
                   </span>
-                  <span className="text-[10px] text-slate-500 font-mono">MSAL Active</span>
+                  <span className="text-[10px] text-slate-500 font-mono">User: {ONEDRIVE_DEFAULT_CONFIG.userEmail}</span>
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-500 block uppercase font-semibold">Relative OneDrive Path:</span>
@@ -978,9 +993,9 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
                   </p>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-500 block uppercase font-semibold">Live PUT Request:</span>
-                  <p className="font-mono text-[10px] text-slate-600 bg-white p-2 rounded-lg border border-blue-100 break-all">
-                    {previewPutEndpoint}
+                  <span className="text-[10px] text-slate-500 block uppercase font-semibold">Graph API PUT Endpoint:</span>
+                  <p className="font-mono text-[10px] text-blue-800 bg-white p-2 rounded-lg border border-blue-100 break-all">
+                    {previewGraphEndpoint}
                   </p>
                 </div>
               </div>
@@ -1017,7 +1032,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
               {isUploading && (
                 <div className="bg-amber-50 p-3 rounded-xl border border-amber-200 text-xs text-amber-900 flex items-center gap-2">
                   <RefreshCw className="w-4 h-4 animate-spin text-[#B8960C] shrink-0" />
-                  <span className="truncate">{uploadProgressStatus || 'Uploading to Microsoft OneDrive...'}</span>
+                  <span className="truncate">{uploadProgressStatus || 'Uploading to OneDrive...'}</span>
                 </div>
               )}
 
@@ -1052,12 +1067,12 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
                 <FileText className="w-5 h-5 text-[#1A3A5C]" />
-                <h3 className="font-bold text-sm text-slate-900 font-serif-heading">Document Record & OneDrive Sync</h3>
+                <h3 className="font-bold text-sm text-slate-900 font-serif-heading">Document Record &amp; OneDrive Sync</h3>
               </div>
               <button
                 type="button"
                 onClick={() => setPreviewDoc(null)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
               >
                 ✕
               </button>
@@ -1072,26 +1087,34 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
               {/* OneDrive Sync Box */}
               <div className="bg-blue-50/60 p-3 rounded-2xl border border-blue-100 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-xs text-[#0078D4] flex items-center gap-1.5">
-                    <Cloud className="w-3.5 h-3.5" />
-                    Microsoft OneDrive for Business
+                  <span className="font-bold text-xs text-blue-900 flex items-center gap-1.5">
+                    <Cloud className="w-3.5 h-3.5 text-[#0078D4]" />
+                    Microsoft OneDrive &amp; SharePoint
                   </span>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
                     Synchronized
                   </span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-400 block uppercase font-semibold">Graph API Target Path</span>
+                  <span className="text-[10px] text-slate-400 block uppercase font-semibold">OneDrive Target Path</span>
                   <p className="font-mono text-[11px] text-slate-800 bg-white p-2 rounded-lg border border-blue-100 break-all">
                     {previewDoc.oneDrivePath || getOneDriveRelativePath(previewDoc.clientName, previewDoc.category, previewDoc.fileName)}
                   </p>
                 </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 block uppercase font-semibold">Graph PUT URL</span>
-                  <p className="font-mono text-[10px] text-slate-600 bg-white p-2 rounded-lg border border-blue-100 break-all">
-                    {getGraphPutEndpoint(previewDoc.clientName, previewDoc.category, previewDoc.fileName)}
-                  </p>
-                </div>
+                {previewDoc.oneDriveUrl && (
+                  <div>
+                    <span className="text-[10px] text-slate-400 block uppercase font-semibold">SharePoint Direct Link</span>
+                    <a
+                      href={previewDoc.oneDriveUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-700 hover:underline flex items-center gap-1 font-mono text-[11px]"
+                    >
+                      <span className="truncate">{previewDoc.oneDriveUrl}</span>
+                      <ExternalLink className="w-3 h-3 shrink-0" />
+                    </a>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-2 bg-slate-50 p-3 rounded-xl">
@@ -1116,7 +1139,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
                   <span className="text-slate-700">{previewDoc.uploadedByName}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-400 block">Date & Time</span>
+                  <span className="text-[10px] text-slate-400 block">Date &amp; Time</span>
                   <span className="text-slate-700">{previewDoc.uploadedAt}</span>
                 </div>
               </div>
@@ -1130,7 +1153,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
 
               {previewDoc.notes && (
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-400">Notes & Brief</span>
+                  <span className="text-[10px] uppercase font-bold text-slate-400">Notes &amp; Brief</span>
                   <p className="text-slate-600 bg-slate-50 p-2.5 rounded-lg mt-0.5">{previewDoc.notes}</p>
                 </div>
               )}
@@ -1140,14 +1163,14 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
               <button
                 type="button"
                 onClick={() => setPreviewDoc(null)}
-                className="px-4 py-2 rounded-xl text-xs text-slate-500 hover:bg-slate-100"
+                className="px-4 py-2 rounded-xl text-xs text-slate-500 hover:bg-slate-100 cursor-pointer"
               >
                 Close
               </button>
               <button
                 type="button"
                 onClick={() => downloadSimulatedDoc(previewDoc)}
-                className="flex items-center gap-1.5 px-4 py-2 bg-[#1A3A5C] text-white rounded-xl text-xs font-bold hover:bg-[#234b75]"
+                className="flex items-center gap-1.5 px-4 py-2 bg-[#1A3A5C] text-white rounded-xl text-xs font-bold hover:bg-[#234b75] cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>Download File</span>
@@ -1157,7 +1180,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
         </div>
       )}
 
-      {/* 7. ONEDRIVE AUDIT LOG MODAL */}
+      {/* 7. MICROSOFT GRAPH AUDIT LOG MODAL */}
       {isAuditModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150 max-h-[85vh] flex flex-col">
@@ -1168,17 +1191,17 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
                 </div>
                 <div>
                   <h3 className="font-bold text-sm text-slate-900 font-serif-heading">
-                    Microsoft OneDrive Synchronization Logs
+                    Microsoft Graph API PUT Transmission Logs
                   </h3>
                   <p className="text-[11px] text-slate-500">
-                    Live Graph API PUT transmission history for <span className="font-mono text-slate-700">{ONEDRIVE_DEFAULT_CONFIG.userEmail}</span>
+                    Live telemetry for <span className="font-mono text-slate-700">{ONEDRIVE_DEFAULT_CONFIG.userEmail}</span> ({ONEDRIVE_DEFAULT_CONFIG.tenantId})
                   </p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setIsAuditModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
               >
                 ✕
               </button>
@@ -1201,12 +1224,12 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
                         {new Date(log.uploadedAt).toLocaleTimeString()}
                       </span>
                     </div>
-                    <div className="bg-white p-2 rounded-xl border border-slate-200/70 font-mono text-[10px] text-slate-700 break-all">
+                    <div className="bg-white p-2 rounded-xl border border-slate-200/70 font-mono text-[10px] text-blue-700 break-all">
                       {log.graphEndpoint}
                     </div>
                     <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1 border-t border-slate-100">
-                      <span>Target: {log.userEmail}</span>
-                      <span className="font-semibold text-emerald-700 uppercase">{log.mode} mode</span>
+                      <span>Target: {ONEDRIVE_DEFAULT_CONFIG.userEmail}</span>
+                      <span className="font-semibold text-blue-700 uppercase">{log.mode} mode</span>
                     </div>
                   </div>
                 ))
@@ -1217,7 +1240,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
               <button
                 type="button"
                 onClick={() => setIsAuditModalOpen(false)}
-                className="px-4 py-2 bg-[#1A3A5C] text-white rounded-xl text-xs font-bold hover:bg-[#254f7a]"
+                className="px-4 py-2 bg-[#1A3A5C] text-white rounded-xl text-xs font-bold hover:bg-[#254f7a] cursor-pointer"
               >
                 Close Audit Log
               </button>
@@ -1225,6 +1248,13 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
           </div>
         </div>
       )}
+
+      {/* OneDrive Folder Manager Modal */}
+      <OneDriveFolderManagerModal
+        isOpen={isFolderManagerOpen}
+        onClose={() => setIsFolderManagerOpen(false)}
+        clients={clients}
+      />
 
     </div>
   );

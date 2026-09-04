@@ -1,8 +1,12 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import express, { Request, Response } from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import jwt from "jsonwebtoken";
+import { googleDriveService, GoogleDriveUploadResult, GoogleDriveClientFolderProvisionResult } from "./server/googleDriveService";
 import { oneDriveService, OneDriveUploadResult, OneDriveClientFolderProvisionResult } from "./server/onedriveService";
 
 const PORT = 3000;
@@ -416,33 +420,19 @@ async function startServer() {
   });
 
   // =========================================================================
-  // MICROSOFT ONEDRIVE FOR BUSINESS & GRAPH API ROUTES
-  // Tenant: iconicinvesting.onmicrosoft.com
+  // MICROSOFT AZURE & MICROSOFT GRAPH API ROUTES (ONEDRIVE FOR BUSINESS)
+  // Target Tenant: iconicinvesting.onmicrosoft.com
   // Target User: augustine_a@iconicinvesting.com.au
   // Base Path: Documents/Abhijith App Test/
   // =========================================================================
-  const SERVER_ONEDRIVE_LOGS: OneDriveUploadResult[] = [
-    {
-      success: true,
-      mode: "simulated",
-      graphEndpoint: "PUT https://graph.microsoft.com/v1.0/users/augustine_a@iconicinvesting.com.au/drive/root:/Documents/Abhijith App Test/Marcus & Elena Vance/Contracts/Contract_of_Sale_14_Burke_St.pdf:/content",
-      relativePath: "Documents/Abhijith App Test/Marcus & Elena Vance/Contracts/Contract_of_Sale_14_Burke_St.pdf",
-      userEmail: "augustine_a@iconicinvesting.com.au",
-      tenant: "iconicinvesting.onmicrosoft.com",
-      driveItemId: "01IIOD7A3F49B90D81E73C",
-      webUrl: "https://iconicinvesting-my.sharepoint.com/personal/augustine_a_iconicinvesting_com_au/Documents/Abhijith%20App%20Test/Marcus%20%26%20Elena%20Vance/Contracts/Contract_of_Sale_14_Burke_St.pdf",
-      fileSize: 1450200,
-      uploadedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
-    }
-  ];
 
-  // 1. Get OneDrive Connection Status
+  // 1. Get Azure / OneDrive Connection Status
   app.get("/api/onedrive/status", async (_req: Request, res: Response) => {
     try {
       const status = await oneDriveService.testConnection();
       return res.json({
         ...status,
-        recentUploadsCount: SERVER_ONEDRIVE_LOGS.length,
+        recentUploadsCount: oneDriveService.getRecentUploads().length,
         config: {
           tenantId: oneDriveService.getConfig().tenantId,
           userEmail: oneDriveService.getConfig().userEmail,
@@ -454,7 +444,7 @@ async function startServer() {
     }
   });
 
-  // 2. Test Connection to Microsoft Graph via MSAL
+  // 2. Test Connection to Azure AD / Microsoft Graph
   app.post("/api/onedrive/test-connection", async (_req: Request, res: Response) => {
     try {
       const status = await oneDriveService.testConnection();
@@ -464,8 +454,7 @@ async function startServer() {
     }
   });
 
-  // 3. Upload File to OneDrive via Graph API
-  // PUT https://graph.microsoft.com/v1.0/users/augustine_a@iconicinvesting.com.au/drive/root:/Documents/Abhijith App Test/{clientName}/{category}/{filename}:/content
+  // 3. Upload File to OneDrive via Graph PUT
   app.post("/api/onedrive/upload", async (req: Request, res: Response) => {
     try {
       const { clientName, category, filename, fileContentBase64, textContent, contentType, metadata } = req.body;
@@ -474,53 +463,31 @@ async function startServer() {
         return res.status(400).json({ error: "clientName, category, and filename are required." });
       }
 
-      let buffer: Buffer;
+      let buffer: Buffer | undefined;
       if (fileContentBase64) {
         buffer = Buffer.from(fileContentBase64, "base64");
       } else if (textContent) {
         buffer = Buffer.from(textContent, "utf-8");
-      } else {
-        // Generate simulated professional document dossier buffer if not supplied
-        const dossierContent = `ICONIC INVESTING - BUYERS AGENCY AUDIT VAULT\n` +
-          `File: ${filename}\n` +
-          `Client: ${clientName}\n` +
-          `Category: ${category}\n` +
-          `Target Path: Documents/Abhijith App Test/${clientName}/${category}/${filename}\n` +
-          `Tenant: iconicinvesting.onmicrosoft.com\n` +
-          `OneDrive User: augustine_a@iconicinvesting.com.au\n` +
-          `Timestamp: ${new Date().toISOString()}\n` +
-          `Metadata: ${JSON.stringify(metadata || {})}\n`;
-        buffer = Buffer.from(dossierContent, "utf-8");
       }
 
-      const result = await oneDriveService.uploadFile({
+      const result: OneDriveUploadResult = await oneDriveService.uploadFile({
         clientName,
         category,
         filename,
         fileBuffer: buffer,
-        contentType: contentType || (filename.endsWith(".pdf") ? "application/pdf" : "text/plain")
-      });
-
-      SERVER_ONEDRIVE_LOGS.unshift(result);
-      if (SERVER_ONEDRIVE_LOGS.length > 50) {
-        SERVER_ONEDRIVE_LOGS.pop();
-      }
-
-      return res.json({
-        success: true,
-        ...result,
+        contentType: contentType || "application/pdf",
         metadata
       });
+
+      return res.json(result);
     } catch (err: any) {
-      console.error("[OneDrive Upload Error]", err);
+      console.error("[Azure/OneDrive Upload Error]", err);
       return res.status(500).json({ error: err.message || "Failed to upload file to OneDrive" });
     }
   });
 
-  // 4. Auto-Create Client Folder Structure in OneDrive via Microsoft Graph API
-  // Path: Documents/Abhijith App Test/{Client Full Name}/
+  // 4. Auto-Create Client Folder Structure in OneDrive
   // Subfolders: Contracts, Building & Pest Reports, Finance Documents, Payment Receipts, ID Verification, Other
-  // Endpoint: POST https://graph.microsoft.com/v1.0/users/augustine_a@iconicinvesting.com.au/drive/root:/Documents/Abhijith App Test/{clientName}:/children
   app.post("/api/onedrive/create-client-folders", async (req: Request, res: Response) => {
     try {
       const { clientName } = req.body;
@@ -531,30 +498,10 @@ async function startServer() {
       const cleanClient = clientName.trim();
       const result: OneDriveClientFolderProvisionResult = await oneDriveService.createClientFolders(cleanClient);
 
-      // Add to server audit log
-      SERVER_ONEDRIVE_LOGS.unshift({
-        success: result.success,
-        mode: result.mode,
-        graphEndpoint: result.clientFolderEndpoint,
-        relativePath: result.clientFolderPath,
-        userEmail: result.userEmail,
-        tenant: result.tenant,
-        driveItemId: result.subfoldersCreated[0]?.driveItemId || "fld_root",
-        webUrl: `https://${result.tenant.replace(".onmicrosoft.com", "")}-my.sharepoint.com/personal/${result.userEmail.replace(/[@.]/g, "_")}/Documents/${encodeURIComponent(result.clientFolderPath)}`,
-        fileSize: 0,
-        uploadedAt: result.createdAt,
-        details: {
-          action: "auto_create_client_folders",
-          clientName: result.clientName,
-          subfolderCount: result.subfoldersCreated.length,
-          subfolders: result.subfoldersCreated.map(s => s.name)
-        }
-      });
-
-      console.log(`[OneDrive Folders] Provisioned structure for ${cleanClient}: 6 subfolders created.`);
+      console.log(`[Azure/OneDrive Folders] Provisioned structure for ${cleanClient}: 6 subfolders created.`);
       return res.json(result);
     } catch (err: any) {
-      console.error("[OneDrive Client Folders Error]", err);
+      console.error("[Azure/OneDrive Client Folders Error]", err);
       return res.status(500).json({ error: err.message || "Failed to create client folders in OneDrive" });
     }
   });
@@ -570,15 +517,260 @@ async function startServer() {
     }
   });
 
-  // 6. List Recent Uploads & Sync Logs
+  // 6. List Recent Uploads & Graph PUT Sync Logs
   app.get("/api/onedrive/recent-uploads", (_req: Request, res: Response) => {
+    const uploads = oneDriveService.getRecentUploads();
     return res.json({
-      uploads: SERVER_ONEDRIVE_LOGS,
-      totalCount: SERVER_ONEDRIVE_LOGS.length,
+      uploads,
+      totalCount: uploads.length,
       tenantId: oneDriveService.getConfig().tenantId,
       userEmail: oneDriveService.getConfig().userEmail,
       basePath: oneDriveService.getConfig().basePath
     });
+  });
+
+  // 7. List All Created Folders in OneDrive
+  app.get("/api/onedrive/folders", (_req: Request, res: Response) => {
+    try {
+      const folders = oneDriveService.getStoredFolders();
+      const tenantDomain = oneDriveService.getConfig().tenantId.replace(".onmicrosoft.com", "");
+      const userPart = oneDriveService.getConfig().userEmail.replace(/[@.]/g, "_");
+      return res.json({
+        success: true,
+        basePath: oneDriveService.getConfig().basePath,
+        userEmail: oneDriveService.getConfig().userEmail,
+        tenantId: oneDriveService.getConfig().tenantId,
+        sharePointRootUrl: `https://${tenantDomain}-my.sharepoint.com/personal/${userPart}/Documents/${encodeURIComponent(oneDriveService.getConfig().basePath.replace(/^Documents\/?/, ""))}`,
+        totalFolders: folders.length,
+        folders
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || "Failed to list OneDrive folders" });
+    }
+  });
+
+  // 8. Create Custom Folder in OneDrive
+  app.post("/api/onedrive/create-folder", async (req: Request, res: Response) => {
+    try {
+      const { folderName, subfolders, parentPath, type } = req.body;
+      if (!folderName || !folderName.trim()) {
+        return res.status(400).json({ error: "folderName is required" });
+      }
+
+      const result = await oneDriveService.createGenericFolder({
+        folderName: folderName.trim(),
+        subfolders: Array.isArray(subfolders) ? subfolders : undefined,
+        parentPath,
+        type
+      });
+
+      return res.json(result);
+    } catch (err: any) {
+      console.error("[Azure/OneDrive Create Folder Error]", err);
+      return res.status(500).json({ error: err.message || "Failed to create folder in OneDrive" });
+    }
+  });
+
+  // 9. Batch Create Folders for Multiple Clients in OneDrive
+  app.post("/api/onedrive/batch-create-client-folders", async (req: Request, res: Response) => {
+    try {
+      const { clientNames } = req.body;
+      const names: string[] = Array.isArray(clientNames) && clientNames.length > 0
+        ? clientNames
+        : ["Marcus & Elena Vance", "Dr. Sophia Thornton (SMSF)", "David & Sarah Miller"];
+
+      const results = [];
+      for (const name of names) {
+        if (name && name.trim()) {
+          const resProvision = await oneDriveService.createClientFolders(name.trim());
+          results.push(resProvision);
+        }
+      }
+
+      const tenantDomain = oneDriveService.getConfig().tenantId.replace(".onmicrosoft.com", "");
+      const userPart = oneDriveService.getConfig().userEmail.replace(/[@.]/g, "_");
+
+      return res.json({
+        success: true,
+        provisionedCount: results.length,
+        results,
+        basePath: oneDriveService.getConfig().basePath,
+        sharePointUrl: `https://${tenantDomain}-my.sharepoint.com/personal/${userPart}/Documents/${encodeURIComponent(oneDriveService.getConfig().basePath.replace(/^Documents\/?/, ""))}`
+      });
+    } catch (err: any) {
+      console.error("[Azure/OneDrive Batch Error]", err);
+      return res.status(500).json({ error: err.message || "Failed to batch provision client folders in OneDrive" });
+    }
+  });
+
+  // =========================================================================
+  // GOOGLE DRIVE API ROUTES
+  // Target Account: augustine_a@iconicinvesting.com.au
+  // Environment variables: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_DRIVE_FOLDER_ID, GOOGLE_REDIRECT_URI, GOOGLE_ACCOUNT_EMAIL
+  // =========================================================================
+
+  // 1. Get Google Drive Connection Status
+  app.get("/api/gdrive/status", async (_req: Request, res: Response) => {
+    try {
+      const status = await googleDriveService.testConnection();
+      return res.json({
+        ...status,
+        recentUploadsCount: googleDriveService.getRecentUploads().length,
+        config: {
+          accountEmail: googleDriveService.getConfig().accountEmail,
+          rootFolderId: googleDriveService.getConfig().rootFolderId,
+          redirectUri: googleDriveService.getConfig().redirectUri,
+        }
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || "Failed to check Google Drive status" });
+    }
+  });
+
+  // 2. Test Connection to Google Drive API
+  app.post("/api/gdrive/test-connection", async (_req: Request, res: Response) => {
+    try {
+      const status = await googleDriveService.testConnection();
+      return res.json(status);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || "Failed to test connection" });
+    }
+  });
+
+  // 3. Upload File to Google Drive
+  app.post("/api/gdrive/upload", async (req: Request, res: Response) => {
+    try {
+      const { clientName, category, filename, base64Content, mimeType, description } = req.body;
+
+      if (!clientName || !category || !filename) {
+        return res.status(400).json({ error: "clientName, category, and filename are required." });
+      }
+
+      const result = await googleDriveService.uploadFile({
+        clientName,
+        category,
+        filename,
+        base64Content,
+        mimeType,
+        description
+      });
+
+      return res.json({
+        success: true,
+        ...result
+      });
+    } catch (err: any) {
+      console.error("[Google Drive Upload Error]", err);
+      return res.status(500).json({ error: err.message || "Failed to upload file to Google Drive" });
+    }
+  });
+
+  // 4. Auto-Create Client Folder Structure in Google Drive
+  // Subfolders: Contracts, Building & Pest Reports, Finance Documents, Payment Receipts, ID Verification, Other
+  app.post("/api/gdrive/create-client-folders", async (req: Request, res: Response) => {
+    try {
+      const { clientName } = req.body;
+      if (!clientName || !clientName.trim()) {
+        return res.status(400).json({ error: "clientName is required." });
+      }
+
+      const cleanClient = clientName.trim();
+      const result: GoogleDriveClientFolderProvisionResult = await googleDriveService.createClientFolders(cleanClient);
+
+      console.log(`[Google Drive Folders] Provisioned structure for ${cleanClient}: 6 subfolders created.`);
+      return res.json(result);
+    } catch (err: any) {
+      console.error("[Google Drive Client Folders Error]", err);
+      return res.status(500).json({ error: err.message || "Failed to create client folders in Google Drive" });
+    }
+  });
+
+  // 5. Query / Inspect Client Folder Structure in Google Drive
+  app.get("/api/gdrive/client-folders/:clientName", async (req: Request, res: Response) => {
+    try {
+      const { clientName } = req.params;
+      const result = await googleDriveService.createClientFolders(clientName);
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || "Failed to inspect client folders" });
+    }
+  });
+
+  // 6. List Recent Uploads & Sync Logs
+  app.get("/api/gdrive/recent-uploads", (_req: Request, res: Response) => {
+    const uploads = googleDriveService.getRecentUploads();
+    return res.json({
+      uploads,
+      totalCount: uploads.length,
+      accountEmail: googleDriveService.getConfig().accountEmail,
+      rootFolderId: googleDriveService.getConfig().rootFolderId
+    });
+  });
+
+  // 7. List All Created Folders in Google Drive
+  app.get("/api/gdrive/folders", (_req: Request, res: Response) => {
+    try {
+      const folders = googleDriveService.getStoredFolders();
+      return res.json({
+        success: true,
+        rootFolderId: googleDriveService.getConfig().rootFolderId,
+        accountEmail: googleDriveService.getConfig().accountEmail,
+        totalFolders: folders.length,
+        folders
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || "Failed to list Google Drive folders" });
+    }
+  });
+
+  // 8. Create Custom Folder in Google Drive
+  app.post("/api/gdrive/create-folder", async (req: Request, res: Response) => {
+    try {
+      const { folderName, subfolders, parentFolderId } = req.body;
+      if (!folderName || !folderName.trim()) {
+        return res.status(400).json({ error: "folderName is required" });
+      }
+
+      const result = await googleDriveService.createGenericFolder({
+        folderName: folderName.trim(),
+        subfolders: Array.isArray(subfolders) ? subfolders : undefined,
+        parentFolderId
+      });
+
+      return res.json(result);
+    } catch (err: any) {
+      console.error("[Google Drive Create Folder Error]", err);
+      return res.status(500).json({ error: err.message || "Failed to create folder in Google Drive" });
+    }
+  });
+
+  // 9. Batch Create Folders for Multiple Clients in Google Drive
+  app.post("/api/gdrive/batch-create-client-folders", async (req: Request, res: Response) => {
+    try {
+      const { clientNames } = req.body;
+      const names: string[] = Array.isArray(clientNames) && clientNames.length > 0
+        ? clientNames
+        : ["David & Sarah Miller", "James & Priya Patel", "Marcus Chen"];
+
+      const results = [];
+      for (const name of names) {
+        if (name && name.trim()) {
+          const resProvision = await googleDriveService.createClientFolders(name.trim());
+          results.push(resProvision);
+        }
+      }
+
+      return res.json({
+        success: true,
+        processedCount: results.length,
+        results,
+        rootFolderId: googleDriveService.getConfig().rootFolderId,
+        accountEmail: googleDriveService.getConfig().accountEmail
+      });
+    } catch (err: any) {
+      console.error("[Google Drive Batch Error]", err);
+      return res.status(500).json({ error: err.message || "Failed to batch provision client folders in Google Drive" });
+    }
   });
 
   // API Route: AI Building & Pest Report Analysis

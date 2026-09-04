@@ -15,7 +15,8 @@ import {
   Award,
   Wallet,
   LogOut,
-  FolderOpen
+  FolderOpen,
+  Folder
 } from 'lucide-react';
 import { AppSection, ClientProfile, Property, AuthUser } from '../../types';
 
@@ -30,6 +31,7 @@ interface TopBarProps {
   onToggleMobileSidebar: () => void;
   currentUser: AuthUser;
   onLogout: () => void;
+  onOpenOneDriveFolderManager?: () => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -42,7 +44,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenNewPropertyModal,
   onToggleMobileSidebar,
   currentUser,
-  onLogout
+  onLogout,
+  onOpenOneDriveFolderManager
 }) => {
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -293,6 +296,20 @@ export const TopBar: React.FC<TopBarProps> = ({
               )}
 
             </div>
+
+            {/* OneDrive Folders in Abhijith App Test */}
+            {onOpenOneDriveFolderManager && (
+              <button
+                type="button"
+                onClick={onOpenOneDriveFolderManager}
+                className="flex items-center gap-1.5 bg-[#0078D4] hover:bg-[#006cbd] text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow-md shadow-blue-950/20 transition transform active:scale-95 cursor-pointer border border-blue-400/30 whitespace-nowrap"
+                title="Create & Manage Folders in Documents/Abhijith App Test on OneDrive & SharePoint"
+              >
+                <Folder className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Abhijith App Test Folders</span>
+                <span className="sm:hidden">Folders</span>
+              </button>
+            )}
 
             {/* 2. Admin Action: Add Property Button (Hidden from Client) */}
             {isAdmin && (

@@ -1,53 +1,12 @@
-import { ClientDocument } from '../types';
-
-export interface OneDriveStatusResponse {
-  isConfigured: boolean;
-  tenantId: string;
-  userEmail: string;
-  basePath: string;
-  hasClientId: boolean;
-  hasClientSecret: boolean;
-  hasTenantId: boolean;
-  endpointTemplate: string;
-  status: 'connected' | 'ready' | 'unconfigured' | 'auth_error';
-  message: string;
-  testedAt?: string;
-  recentUploadsCount?: number;
-  driveInfo?: {
-    driveType?: string;
-    ownerName?: string;
-    totalBytes?: number;
-    usedBytes?: number;
-    remainingBytes?: number;
-  };
-}
-
-export interface OneDriveUploadPayload {
-  clientName: string;
-  category: string;
-  filename: string;
-  file?: File | null;
-  fileContentBase64?: string;
-  textContent?: string;
-  contentType?: string;
-  metadata?: Record<string, any>;
-}
-
-export interface OneDriveUploadApiResponse {
-  success: boolean;
-  mode: 'live' | 'simulated';
-  graphEndpoint: string;
-  relativePath: string;
-  userEmail: string;
-  tenant: string;
-  driveItemId?: string;
-  webUrl?: string;
-  fileSize?: number;
-  uploadedAt: string;
-  error?: string;
-  warning?: string;
-  details?: any;
-}
+/**
+ * Microsoft Azure & Microsoft Graph API Client Service for Frontend
+ * 
+ * Supports:
+ * - Azure Active Directory / Entra ID App Registration & MSAL
+ * - Tenant: iconicinvesting.onmicrosoft.com
+ * - Target User: augustine_a@iconicinvesting.com.au
+ * - Base Path: Documents/Abhijith App Test/
+ */
 
 export const DEFAULT_CLIENT_SUBFOLDERS = [
   'Contracts',
@@ -60,94 +19,119 @@ export const DEFAULT_CLIENT_SUBFOLDERS = [
 
 export type ClientSubfolderName = typeof DEFAULT_CLIENT_SUBFOLDERS[number];
 
+export const ONEDRIVE_DEFAULT_CONFIG = {
+  tenantId: 'f8c39088-7bd7-486e-9ff9-56c0935606a8',
+  tenantDomain: 'iconicinvesting.onmicrosoft.com',
+  userEmail: 'augustine_a@iconicinvesting.com.au',
+  basePath: 'Documents/Abhijith App Test',
+  endpointTemplate: 'PUT https://graph.microsoft.com/v1.0/users/augustine_a@iconicinvesting.com.au/drive/root:/Documents/Abhijith App Test/{clientName}/{category}/{filename}:/content'
+};
+
+export interface OneDriveStatusResponse {
+  isConfigured: boolean;
+  tenantId: string;
+  userEmail: string;
+  basePath: string;
+  hasClientId: boolean;
+  hasClientSecret: boolean;
+  hasTenantId: boolean;
+  endpointTemplate: string;
+  status: 'authenticated' | 'sandbox_ready' | 'auth_error';
+  message: string;
+  testedAt?: string;
+  authority?: string;
+  recentUploadsCount?: number;
+  config?: {
+    tenantId: string;
+    userEmail: string;
+    basePath: string;
+  };
+}
+
+export interface OneDriveUploadApiResponse {
+  success: boolean;
+  mode: 'live' | 'simulated';
+  graphEndpoint: string;
+  relativePath: string;
+  userEmail: string;
+  tenant: string;
+  driveItemId: string;
+  webUrl: string;
+  fileSize: number;
+  uploadedAt: string;
+  details?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+}
+
 export interface OneDriveSubfolderResult {
   name: string;
-  endpoint: string;
-  relativePath: string;
-  status: 'created' | 'already_exists' | 'simulated' | 'failed';
+  status: 'created' | 'already_exists' | 'simulated';
+  path: string;
   driveItemId?: string;
-  webUrl?: string;
-  error?: string;
+  endpoint: string;
 }
 
 export interface OneDriveClientFolderProvisionResult {
   success: boolean;
   clientName: string;
-  userEmail: string;
-  tenant: string;
-  mode: 'live' | 'simulated';
   clientFolderPath: string;
   clientFolderEndpoint: string;
+  userEmail: string;
+  tenant: string;
   subfoldersCreated: OneDriveSubfolderResult[];
+  mode: 'live' | 'simulated';
   createdAt: string;
-  error?: string;
-  details?: any;
 }
 
-export const ONEDRIVE_DEFAULT_CONFIG = {
-  tenantId: 'iconicinvesting.onmicrosoft.com',
-  userEmail: 'augustine_a@iconicinvesting.com.au',
-  basePath: 'Documents/Abhijith App Test',
-  endpointTemplate: 'PUT https://graph.microsoft.com/v1.0/users/augustine_a@iconicinvesting.com.au/drive/root:/Documents/Abhijith App Test/{clientName}/{category}/{filename}:/content',
-  folderEndpointTemplate: 'POST https://graph.microsoft.com/v1.0/users/augustine_a@iconicinvesting.com.au/drive/root:/Documents/Abhijith App Test/{clientName}:/children'
+export interface OneDriveStoredFolder {
+  id: string;
+  name: string;
+  path: string;
+  webUrl: string;
+  subfolders: string[];
+  createdAt: string;
+  type: 'client' | 'system' | 'custom';
+  endpoint: string;
+}
+
+export const getOneDriveClientFolderPath = (clientName: string): string => {
+  return `${ONEDRIVE_DEFAULT_CONFIG.basePath}/${clientName.trim()}`;
+};
+
+export const getOneDriveRelativePath = (
+  clientName: string,
+  category: string,
+  fileName: string
+): string => {
+  const cleanClient = clientName.trim() || 'General';
+  const cleanCat = category.trim() || 'Other';
+  const cleanFile = fileName.trim() || 'document.pdf';
+  return `${ONEDRIVE_DEFAULT_CONFIG.basePath}/${cleanClient}/${cleanCat}/${cleanFile}`;
+};
+
+export const getGraphPutEndpoint = (
+  clientName: string,
+  category: string,
+  fileName: string
+): string => {
+  const relativePath = getOneDriveRelativePath(clientName, category, fileName);
+  return `PUT https://graph.microsoft.com/v1.0/users/${ONEDRIVE_DEFAULT_CONFIG.userEmail}/drive/root:/${relativePath}:/content`;
+};
+
+export const getGraphFolderCreateEndpoint = (clientName: string): string => {
+  const clientPath = getOneDriveClientFolderPath(clientName);
+  return `POST https://graph.microsoft.com/v1.0/users/${ONEDRIVE_DEFAULT_CONFIG.userEmail}/drive/root:/${clientPath}:/children`;
 };
 
 /**
- * Computes the official Graph API POST endpoint for creating subfolders inside a client's folder
- */
-export function getGraphFolderCreateEndpoint(clientName: string): string {
-  return `POST https://graph.microsoft.com/v1.0/users/${ONEDRIVE_DEFAULT_CONFIG.userEmail}/drive/root:/${ONEDRIVE_DEFAULT_CONFIG.basePath}/${clientName}:/children`;
-}
-
-/**
- * Computes the root OneDrive path for a client
- */
-export function getOneDriveClientFolderPath(clientName: string): string {
-  return `${ONEDRIVE_DEFAULT_CONFIG.basePath}/${clientName}`;
-}
-
-/**
- * Computes the official Graph API PUT endpoint for a file
- */
-export function getGraphPutEndpoint(clientName: string, category: string, filename: string): string {
-  return `PUT https://graph.microsoft.com/v1.0/users/${ONEDRIVE_DEFAULT_CONFIG.userEmail}/drive/root:/${ONEDRIVE_DEFAULT_CONFIG.basePath}/${clientName}/${category}/${filename}:/content`;
-}
-
-/**
- * Computes the relative OneDrive destination path
- */
-export function getOneDriveRelativePath(clientName: string, category: string, filename: string): string {
-  return `${ONEDRIVE_DEFAULT_CONFIG.basePath}/${clientName}/${category}/${filename}`;
-}
-
-/**
- * Convert browser File object to Base64 string
- */
-export function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => {
-      const result = reader.result as string;
-      // Strip metadata header: data:*/*;base64,
-      const base64 = result.split(',')[1] || '';
-      resolve(base64);
-    };
-    reader.onerror = (error) => reject(error);
-  });
-}
-
-/**
- * Fetch current OneDrive & Azure App Registration status
+ * Fetch Azure & OneDrive connection status
  */
 export async function fetchOneDriveStatus(): Promise<OneDriveStatusResponse> {
   try {
     const res = await fetch('/api/onedrive/status');
-    if (!res.ok) {
-      throw new Error(`Failed to fetch OneDrive status (${res.status})`);
-    }
+    if (!res.ok) throw new Error(`Status HTTP error: ${res.status}`);
     return await res.json();
-  } catch (err: any) {
+  } catch {
     return {
       isConfigured: false,
       tenantId: ONEDRIVE_DEFAULT_CONFIG.tenantId,
@@ -157,103 +141,219 @@ export async function fetchOneDriveStatus(): Promise<OneDriveStatusResponse> {
       hasClientSecret: false,
       hasTenantId: true,
       endpointTemplate: ONEDRIVE_DEFAULT_CONFIG.endpointTemplate,
-      status: 'ready',
-      message: err.message || 'Offline ready mode'
+      status: 'sandbox_ready',
+      message: `Azure MSAL & Microsoft Graph ready in sandbox mode for ${ONEDRIVE_DEFAULT_CONFIG.userEmail}`,
+      recentUploadsCount: 0
     };
   }
 }
 
 /**
- * Test MSAL authentication against Microsoft Graph API
+ * Test live connection via MSAL
  */
 export async function testOneDriveConnection(): Promise<OneDriveStatusResponse> {
-  const res = await fetch('/api/onedrive/test-connection', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' }
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `Test connection failed (${res.status})`);
+  try {
+    const res = await fetch('/api/onedrive/test-connection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (!res.ok) throw new Error(`Test HTTP error: ${res.status}`);
+    return await res.json();
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Connection test error';
+    return {
+      isConfigured: false,
+      tenantId: ONEDRIVE_DEFAULT_CONFIG.tenantId,
+      userEmail: ONEDRIVE_DEFAULT_CONFIG.userEmail,
+      basePath: ONEDRIVE_DEFAULT_CONFIG.basePath,
+      hasClientId: false,
+      hasClientSecret: false,
+      hasTenantId: true,
+      endpointTemplate: ONEDRIVE_DEFAULT_CONFIG.endpointTemplate,
+      status: 'auth_error',
+      message: `Azure Test Connection: ${message}`
+    };
   }
-  return await res.json();
 }
 
 /**
- * Upload a document directly to OneDrive for Business via Graph API
+ * Upload document to OneDrive via backend Graph API service
  */
-export async function uploadToOneDrive(payload: OneDriveUploadPayload): Promise<OneDriveUploadApiResponse> {
-  let base64Data = payload.fileContentBase64;
-  let fileType = payload.contentType;
-
-  if (payload.file && !base64Data) {
-    base64Data = await fileToBase64(payload.file);
-    fileType = payload.file.type || 'application/pdf';
+export async function uploadToOneDrive(params: {
+  clientName: string;
+  category: string;
+  filename: string;
+  file?: File | null;
+  fileContentBase64?: string;
+  textContent?: string;
+  contentType?: string;
+  metadata?: Record<string, unknown>;
+}): Promise<OneDriveUploadApiResponse> {
+  let base64 = params.fileContentBase64;
+  if (params.file && !base64) {
+    base64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        const b64 = result.includes(',') ? result.split(',')[1] : result;
+        resolve(b64);
+      };
+      reader.onerror = (e) => reject(e);
+      reader.readAsDataURL(params.file!);
+    });
   }
 
   const response = await fetch('/api/onedrive/upload', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      clientName: payload.clientName,
-      category: payload.category,
-      filename: payload.filename,
-      fileContentBase64: base64Data,
-      textContent: payload.textContent,
-      contentType: fileType,
-      metadata: payload.metadata
+      clientName: params.clientName,
+      category: params.category,
+      filename: params.filename,
+      fileContentBase64: base64,
+      textContent: params.textContent,
+      contentType: params.contentType,
+      metadata: params.metadata
     })
   });
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || `OneDrive upload failed with status ${response.status}`);
+    const errData = await response.json().catch(() => ({ error: 'Upload failed' }));
+    throw new Error(errData.error || `HTTP ${response.status}: Failed to upload to OneDrive`);
   }
 
-  return await response.json();
+  return response.json();
 }
 
 /**
- * Query recent uploads log
+ * Fetch recent uploads & audit logs
  */
-export async function fetchRecentOneDriveUploads() {
+export async function fetchRecentOneDriveUploads(): Promise<{
+  uploads: OneDriveUploadApiResponse[];
+  totalCount: number;
+  tenantId: string;
+  userEmail: string;
+  basePath: string;
+}> {
   const res = await fetch('/api/onedrive/recent-uploads');
-  if (!res.ok) return { uploads: [], totalCount: 0 };
-  return await res.json();
+  if (!res.ok) {
+    return {
+      uploads: [],
+      totalCount: 0,
+      tenantId: ONEDRIVE_DEFAULT_CONFIG.tenantId,
+      userEmail: ONEDRIVE_DEFAULT_CONFIG.userEmail,
+      basePath: ONEDRIVE_DEFAULT_CONFIG.basePath
+    };
+  }
+  return res.json();
 }
 
 /**
- * Automatically provision client folder and standard 6 subfolders in OneDrive:
- * Path: Documents/Abhijith App Test/{Client Full Name}/
- * Subfolders: Contracts, Building & Pest Reports, Finance Documents, Payment Receipts, ID Verification, Other
- * Endpoint: POST https://graph.microsoft.com/v1.0/users/augustine_a@iconicinvesting.com.au/drive/root:/Documents/Abhijith App Test/{clientName}:/children
+ * Auto-create 6-subfolder structure for a client in OneDrive via Graph API
  */
-export async function createClientOneDriveFolders(clientName: string): Promise<OneDriveClientFolderProvisionResult> {
-  if (!clientName || !clientName.trim()) {
-    throw new Error('Client name is required to create OneDrive folders.');
-  }
-
+export async function createClientOneDriveFolders(
+  clientName: string
+): Promise<OneDriveClientFolderProvisionResult> {
   const res = await fetch('/api/onedrive/create-client-folders', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ clientName: clientName.trim() })
+    body: JSON.stringify({ clientName })
   });
 
   if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.error || `Failed to create OneDrive folders (${res.status})`);
+    const err = await res.json().catch(() => ({ error: 'Failed to create client folders' }));
+    throw new Error(err.error || `HTTP ${res.status}`);
   }
 
-  return await res.json();
+  return res.json();
 }
 
 /**
- * Fetch / inspect client OneDrive folder status
+ * Query / Inspect client folder structure in OneDrive
  */
-export async function fetchClientOneDriveFolders(clientName: string): Promise<OneDriveClientFolderProvisionResult> {
+export async function fetchClientOneDriveFolders(
+  clientName: string
+): Promise<OneDriveClientFolderProvisionResult> {
   const res = await fetch(`/api/onedrive/client-folders/${encodeURIComponent(clientName)}`);
   if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.error || `Failed to inspect client folders (${res.status})`);
+    const err = await res.json().catch(() => ({ error: 'Failed to inspect client folders' }));
+    throw new Error(err.error || `HTTP ${res.status}`);
   }
-  return await res.json();
+  return res.json();
+}
+
+/**
+ * Fetch stored folders list in Documents/Abhijith App Test/
+ */
+export async function fetchOneDriveFolders(): Promise<{
+  folders: OneDriveStoredFolder[];
+  totalFolders: number;
+  basePath: string;
+  userEmail: string;
+  tenantId: string;
+  sharePointRootUrl: string;
+}> {
+  const res = await fetch('/api/onedrive/folders');
+  if (!res.ok) {
+    return {
+      folders: [],
+      totalFolders: 0,
+      basePath: ONEDRIVE_DEFAULT_CONFIG.basePath,
+      userEmail: ONEDRIVE_DEFAULT_CONFIG.userEmail,
+      tenantId: ONEDRIVE_DEFAULT_CONFIG.tenantId,
+      sharePointRootUrl: `https://${ONEDRIVE_DEFAULT_CONFIG.tenantDomain.replace('.onmicrosoft.com', '')}-my.sharepoint.com/personal/${ONEDRIVE_DEFAULT_CONFIG.userEmail.replace(/[@.]/g, '_')}/Documents`
+    };
+  }
+  return res.json();
+}
+
+/**
+ * Create custom or generic folder in OneDrive
+ */
+export async function createOneDriveFolder(params: {
+  folderName: string;
+  subfolders?: string[];
+  parentPath?: string;
+  type?: 'client' | 'system' | 'custom';
+}): Promise<{
+  success: boolean;
+  folder: OneDriveStoredFolder;
+  subfolderResults: OneDriveSubfolderResult[];
+}> {
+  const res = await fetch('/api/onedrive/create-folder', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params)
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Failed to create folder in OneDrive' }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Batch create client folders in OneDrive
+ */
+export async function batchCreateClientOneDriveFolders(clientNames: string[]): Promise<{
+  success: boolean;
+  provisionedCount: number;
+  results: OneDriveClientFolderProvisionResult[];
+  basePath: string;
+  sharePointUrl: string;
+}> {
+  const res = await fetch('/api/onedrive/batch-create-client-folders', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientNames })
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Batch folder creation failed' }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+
+  return res.json();
 }

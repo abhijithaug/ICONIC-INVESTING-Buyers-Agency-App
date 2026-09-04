@@ -40,13 +40,14 @@ import {
   Link2,
   Cloud,
   FolderCheck,
-  Folder
+  Folder,
+  FolderTree
 } from 'lucide-react';
+import { OneDriveFolderManagerModal } from '../Documents/OneDriveFolderManagerModal';
 import { 
   DEFAULT_CLIENT_SUBFOLDERS, 
   createClientOneDriveFolders, 
   fetchClientOneDriveFolders,
-  getGraphFolderCreateEndpoint,
   getOneDriveClientFolderPath,
   ONEDRIVE_DEFAULT_CONFIG,
   OneDriveClientFolderProvisionResult
@@ -141,6 +142,7 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isDossierOpen, setIsDossierOpen] = useState(false);
+  const [isOneDriveFolderModalOpen, setIsOneDriveFolderModalOpen] = useState(false);
   const [revokeTargetClient, setRevokeTargetClient] = useState<ClientProfile | null>(null);
 
   // Selected client for Edit, Dossier, Upload, or OneDrive Folders
@@ -321,6 +323,14 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
 
           {/* Primary Action Buttons */}
           <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={() => setIsOneDriveFolderModalOpen(true)}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#0078D4] hover:bg-[#006cbd] text-white text-xs font-bold rounded-xl shadow-md transition-all border border-blue-400/30"
+              title="Create & manage folders in Microsoft OneDrive"
+            >
+              <FolderTree className="w-4 h-4" />
+              OneDrive Folders
+            </button>
             <button
               onClick={() => {
                 setUploadTargetClientId(clients[0]?.id || '');
@@ -1139,7 +1149,7 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* 6. ONEDRIVE CLIENT FOLDERS INSPECTOR & PROVISIONER MODAL */}
+      {/* 6. MICROSOFT ONEDRIVE CLIENT FOLDERS INSPECTOR & PROVISIONER MODAL */}
       {/* ========================================================================= */}
       {selectedClientForOneDrive && (
         <OneDriveFoldersModal
@@ -1147,12 +1157,21 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
           onClose={() => setSelectedClientForOneDrive(null)}
         />
       )}
+
+      {/* ========================================================================= */}
+      {/* 7. MICROSOFT ONEDRIVE HUB MANAGER */}
+      {/* ========================================================================= */}
+      <OneDriveFolderManagerModal
+        isOpen={isOneDriveFolderModalOpen}
+        onClose={() => setIsOneDriveFolderModalOpen(false)}
+        clients={clients}
+      />
     </div>
   );
 };
 
 // =============================================================================
-// SUBCOMPONENT: ONEDRIVE CLIENT FOLDERS INSPECTOR & PROVISIONER MODAL
+// SUBCOMPONENT: MICROSOFT ONEDRIVE CLIENT FOLDERS INSPECTOR & PROVISIONER MODAL
 // =============================================================================
 
 interface OneDriveFoldersModalProps {
@@ -1170,7 +1189,7 @@ const OneDriveFoldersModal: React.FC<OneDriveFoldersModalProps> = ({ client, onC
 
   const clientName = client.fullName || client.name;
   const folderPath = getOneDriveClientFolderPath(clientName);
-  const endpoint = getGraphFolderCreateEndpoint(clientName);
+  const endpoint = `POST https://graph.microsoft.com/v1.0/users/${ONEDRIVE_DEFAULT_CONFIG.userEmail}/drive/root:/${folderPath}:/children`;
 
   useEffect(() => {
     let active = true;
@@ -1184,9 +1203,10 @@ const OneDriveFoldersModal: React.FC<OneDriveFoldersModalProps> = ({ client, onC
           setIsLoading(false);
         }
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         if (active) {
-          setErrorMessage(err.message);
+          const msg = err instanceof Error ? err.message : 'Failed to fetch OneDrive folders';
+          setErrorMessage(msg);
           setIsLoading(false);
         }
       });
@@ -1202,8 +1222,9 @@ const OneDriveFoldersModal: React.FC<OneDriveFoldersModalProps> = ({ client, onC
     try {
       const res = await createClientOneDriveFolders(clientName);
       setFolderResult(res);
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to sync OneDrive folders');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to sync OneDrive folders';
+      setErrorMessage(msg);
     } finally {
       setIsLoading(false);
     }
@@ -1226,9 +1247,9 @@ const OneDriveFoldersModal: React.FC<OneDriveFoldersModalProps> = ({ client, onC
             </div>
             <div>
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <span>OneDrive Client Folders</span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-[#0078D4] border border-blue-200">
-                  {folderResult?.mode === 'live' ? 'Live MSAL' : 'Simulated / Ready'}
+                <span>Microsoft OneDrive Client Folders</span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200">
+                  {folderResult?.mode === 'live' ? 'Live Azure Graph' : 'Simulated / Ready'}
                 </span>
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
@@ -1236,7 +1257,7 @@ const OneDriveFoldersModal: React.FC<OneDriveFoldersModalProps> = ({ client, onC
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1.5 rounded-xl transition-colors">
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1.5 rounded-xl transition-colors cursor-pointer">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -1244,11 +1265,11 @@ const OneDriveFoldersModal: React.FC<OneDriveFoldersModalProps> = ({ client, onC
         {/* Directory Path Info */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-[11px]">
-            <span className="font-bold text-slate-700 uppercase tracking-wider">OneDrive Base Path</span>
+            <span className="font-bold text-slate-700 uppercase tracking-wider">Azure Storage Path</span>
             <button
               type="button"
               onClick={() => copyToClipboard(folderPath, 'path')}
-              className="text-[#0078D4] hover:underline font-bold flex items-center gap-1 text-[11px]"
+              className="text-[#0078D4] hover:underline font-bold flex items-center gap-1 text-[11px] cursor-pointer"
             >
               {copiedKey === 'path' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
               <span>{copiedKey === 'path' ? 'Copied' : 'Copy Path'}</span>
@@ -1259,20 +1280,20 @@ const OneDriveFoldersModal: React.FC<OneDriveFoldersModalProps> = ({ client, onC
           </div>
         </div>
 
-        {/* Graph API Endpoint */}
+        {/* Microsoft Graph API Endpoint */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-[11px]">
-            <span className="font-bold text-slate-700 uppercase tracking-wider">Graph API Creation Endpoint</span>
+            <span className="font-bold text-slate-700 uppercase tracking-wider">Graph API POST Endpoint</span>
             <button
               type="button"
               onClick={() => copyToClipboard(endpoint, 'endpoint')}
-              className="text-[#0078D4] hover:underline font-bold flex items-center gap-1 text-[11px]"
+              className="text-[#0078D4] hover:underline font-bold flex items-center gap-1 text-[11px] cursor-pointer"
             >
               {copiedKey === 'endpoint' ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
               <span>{copiedKey === 'endpoint' ? 'Copied' : 'Copy Endpoint'}</span>
             </button>
           </div>
-          <div className="p-3 bg-blue-50/50 rounded-xl border border-blue-100 font-mono text-[10px] text-[#0078D4] break-all">
+          <div className="p-3 bg-blue-50/50 rounded-xl border border-blue-100 font-mono text-[10px] text-blue-900 break-all">
             {endpoint}
           </div>
         </div>
@@ -1283,7 +1304,7 @@ const OneDriveFoldersModal: React.FC<OneDriveFoldersModalProps> = ({ client, onC
             <span className="font-bold text-slate-700 uppercase tracking-wider">
               6 Standard Subfolders
             </span>
-            <span className="text-emerald-700 font-semibold flex items-center gap-1">
+            <span className="text-[#0078D4] font-semibold flex items-center gap-1">
               <FolderCheck className="w-3.5 h-3.5" />
               Auto-Provisioned
             </span>
@@ -1301,9 +1322,9 @@ const OneDriveFoldersModal: React.FC<OneDriveFoldersModalProps> = ({ client, onC
                     <Folder className="w-4 h-4 text-[#0078D4] shrink-0" />
                     <span className="font-medium text-slate-800 truncate">{subfolderName}</span>
                   </div>
-                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 shrink-0">
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200 shrink-0">
                     <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                    <span>{subResult?.status === 'already_exists' ? 'Verified' : 'Ready'}</span>
+                    <span>{subResult ? 'Verified' : 'Ready'}</span>
                   </span>
                 </div>
               );
@@ -1311,14 +1332,14 @@ const OneDriveFoldersModal: React.FC<OneDriveFoldersModalProps> = ({ client, onC
           </div>
         </div>
 
-        {/* Tenant & User Info */}
+        {/* Azure Account & Folder Info */}
         <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-xs space-y-1.5">
           <div className="flex items-center justify-between text-[11px] text-slate-500">
-            <span>Microsoft 365 Account:</span>
+            <span>Microsoft Azure User:</span>
             <span className="font-mono font-bold text-slate-700">{ONEDRIVE_DEFAULT_CONFIG.userEmail}</span>
           </div>
           <div className="flex items-center justify-between text-[11px] text-slate-500">
-            <span>Tenant Domain:</span>
+            <span>Azure Tenant ID:</span>
             <span className="font-mono font-bold text-slate-700">{ONEDRIVE_DEFAULT_CONFIG.tenantId}</span>
           </div>
         </div>
@@ -1336,7 +1357,7 @@ const OneDriveFoldersModal: React.FC<OneDriveFoldersModalProps> = ({ client, onC
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors"
+            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors cursor-pointer"
           >
             Close
           </button>
@@ -1345,7 +1366,7 @@ const OneDriveFoldersModal: React.FC<OneDriveFoldersModalProps> = ({ client, onC
             type="button"
             disabled={isLoading}
             onClick={handleSyncFolders}
-            className="px-4 py-2 bg-[#0078D4] hover:bg-[#006cbd] text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-2 disabled:opacity-50"
+            className="px-4 py-2 bg-[#0078D4] hover:bg-[#006cbd] text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-2 disabled:opacity-50 cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
             <span>{isLoading ? 'Provisioning Folders...' : 'Re-sync / Verify 6 Subfolders'}</span>

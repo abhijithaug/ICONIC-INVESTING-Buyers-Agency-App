@@ -15,6 +15,7 @@ import { NewPropertyModal } from './components/Modals/NewPropertyModal';
 import { LoginScreen } from './components/Auth/LoginScreen';
 import { SetPasswordScreen } from './components/Auth/SetPasswordScreen';
 import { ClientDocumentHub } from './components/Documents/ClientDocumentHub';
+import { OneDriveFolderManagerModal } from './components/Documents/OneDriveFolderManagerModal';
 import { AdminControlPanel } from './components/Admin/AdminControlPanel';
 import { ClientAgentMessaging } from './components/Messages/ClientAgentMessaging';
 import { Cloud, CheckCircle2, X, FolderCheck } from 'lucide-react';
@@ -175,6 +176,7 @@ export default function App() {
   const [detailModalProperty, setDetailModalProperty] = useState<Property | null>(null);
   const [cashflowModalProperty, setCashflowModalProperty] = useState<Property | null>(null);
   const [isNewPropertyModalOpen, setIsNewPropertyModalOpen] = useState<boolean>(false);
+  const [isOneDriveFolderModalOpen, setIsOneDriveFolderModalOpen] = useState<boolean>(false);
 
   // Real-time Microsoft Graph OneDrive automated folder creation toast
   const [oneDriveToast, setOneDriveToast] = useState<{
@@ -873,6 +875,7 @@ export default function App() {
           onToggleMobileSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
           currentUser={currentUser}
           onLogout={handleLogout}
+          onOpenOneDriveFolderManager={() => setIsOneDriveFolderModalOpen(true)}
         />
 
         {/* Dynamic Section Content Container */}
@@ -1053,6 +1056,12 @@ export default function App() {
             onAddProperty={handleAddProperty}
           />
         )}
+
+        <OneDriveFolderManagerModal
+          isOpen={isOneDriveFolderModalOpen}
+          onClose={() => setIsOneDriveFolderModalOpen(false)}
+          clients={clients}
+        />
 
         {/* OneDrive Automated Folder Creation Toast */}
         {oneDriveToast && (

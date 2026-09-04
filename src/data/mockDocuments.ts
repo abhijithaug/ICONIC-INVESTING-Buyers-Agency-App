@@ -114,7 +114,11 @@ export const INITIAL_DOCUMENTS: ClientDocument[] = [
     uploadedAt: '2026-09-02',
     propertyAddress: '42 Bunya Pine Circuit, Kallangur QLD 4503',
     status: 'Under Review',
-    notes: 'Confirming clean freehold title, no unapproved easements, and standard residential zoning.'
+    notes: 'Confirming clean freehold title, no unapproved easements, and standard residential zoning.',
+    oneDriveSyncStatus: 'synced',
+    oneDrivePath: 'Documents/Abhijith App Test/Marcus & Elena Vance/Other/Moreton_Bay_Council_Rates_and_Title_Search.pdf',
+    oneDriveUrl: 'https://iconicinvesting-my.sharepoint.com/personal/augustine_a_iconicinvesting_com_au/Documents/Abhijith%20App%20Test/Marcus%20%26%20Elena%20Vance/Other/Moreton_Bay_Council_Rates_and_Title_Search.pdf',
+    oneDriveSyncedAt: '2026-09-02 10:15'
   },
   {
     id: 'doc-6',
@@ -129,7 +133,11 @@ export const INITIAL_DOCUMENTS: ClientDocument[] = [
     uploadedByName: 'Damian Sterling (Buyers Advocate)',
     uploadedAt: '2026-08-10',
     status: 'Verified',
-    notes: 'Official client acquisition blueprint targeting high-growth SEQ & Perth investment corridors.'
+    notes: 'Official client acquisition blueprint targeting high-growth SEQ & Perth investment corridors.',
+    oneDriveSyncStatus: 'synced',
+    oneDrivePath: 'Documents/Abhijith App Test/Marcus & Elena Vance/Other/Marcus_Elena_Iconic_Acquisition_Mandate.pdf',
+    oneDriveUrl: 'https://iconicinvesting-my.sharepoint.com/personal/augustine_a_iconicinvesting_com_au/Documents/Abhijith%20App%20Test/Marcus%20%26%20Elena%20Vance/Other/Marcus_Elena_Iconic_Acquisition_Mandate.pdf',
+    oneDriveSyncedAt: '2026-08-10 17:00'
   },
 
   // Documents for Client-2 (Dr. Sophia Thornton)
@@ -146,7 +154,11 @@ export const INITIAL_DOCUMENTS: ClientDocument[] = [
     uploadedByName: 'Dr. Sophia Thornton',
     uploadedAt: '2026-08-19',
     status: 'Verified',
-    notes: 'SMSF LRBA pre-approval confirmed with NAB Private. Liquid deposit allocated: $450,000.'
+    notes: 'SMSF LRBA pre-approval confirmed with NAB Private. Liquid deposit allocated: $450,000.',
+    oneDriveSyncStatus: 'synced',
+    oneDrivePath: 'Documents/Abhijith App Test/Dr. Sophia Thornton (SMSF)/Finance Documents/NAB_Private_Wealth_SMSF_PreApproval_1_7M.pdf',
+    oneDriveUrl: 'https://iconicinvesting-my.sharepoint.com/personal/augustine_a_iconicinvesting_com_au/Documents/Abhijith%20App%20Test/Dr.%20Sophia%20Thornton%20(SMSF)/Finance%20Documents/NAB_Private_Wealth_SMSF_PreApproval_1_7M.pdf',
+    oneDriveSyncedAt: '2026-08-19 14:00'
   },
   {
     id: 'doc-8',
@@ -161,7 +173,11 @@ export const INITIAL_DOCUMENTS: ClientDocument[] = [
     uploadedByName: 'Dr. Sophia Thornton',
     uploadedAt: '2026-08-18',
     status: 'Verified',
-    notes: 'Executed SMSF Deed with corporate trustee entity certificate of registration.'
+    notes: 'Executed SMSF Deed with corporate trustee entity certificate of registration.',
+    oneDriveSyncStatus: 'synced',
+    oneDrivePath: 'Documents/Abhijith App Test/Dr. Sophia Thornton (SMSF)/ID Verification/Thornton_SMSF_Executed_Trust_Deed.pdf',
+    oneDriveUrl: 'https://iconicinvesting-my.sharepoint.com/personal/augustine_a_iconicinvesting_com_au/Documents/Abhijith%20App%20Test/Dr.%20Sophia%20Thornton%20(SMSF)/ID%20Verification/Thornton_SMSF_Executed_Trust_Deed.pdf',
+    oneDriveSyncedAt: '2026-08-18 11:30'
   },
   {
     id: 'doc-9',
@@ -177,7 +193,11 @@ export const INITIAL_DOCUMENTS: ClientDocument[] = [
     uploadedAt: '2026-08-25',
     propertyAddress: '7 Jacaranda Crescent, Strathpine QLD 4500',
     status: 'Under Review',
-    notes: 'Under review with conveyancer. Special condition drafted for council tenancy compliance.'
+    notes: 'Under review with conveyancer. Special condition drafted for council tenancy compliance.',
+    oneDriveSyncStatus: 'synced',
+    oneDrivePath: 'Documents/Abhijith App Test/Dr. Sophia Thornton (SMSF)/Contracts/Draft_Contract_7_Jacaranda_Strathpine.pdf',
+    oneDriveUrl: 'https://iconicinvesting-my.sharepoint.com/personal/augustine_a_iconicinvesting_com_au/Documents/Abhijith%20App%20Test/Dr.%20Sophia%20Thornton%20(SMSF)/Contracts/Draft_Contract_7_Jacaranda_Strathpine.pdf',
+    oneDriveSyncedAt: '2026-08-25 16:45'
   },
   {
     id: 'doc-10',
@@ -193,7 +213,11 @@ export const INITIAL_DOCUMENTS: ClientDocument[] = [
     uploadedAt: '2026-08-26',
     propertyAddress: '7 Jacaranda Crescent, Strathpine QLD 4500',
     status: 'Verified',
-    notes: 'Confirming auxiliary dwelling / granny flat is fully approved with separate metering.'
+    notes: 'Confirming auxiliary dwelling / granny flat is fully approved with separate metering.',
+    oneDriveSyncStatus: 'synced',
+    oneDrivePath: 'Documents/Abhijith App Test/Dr. Sophia Thornton (SMSF)/Other/Moreton_Bay_Dual_Key_Council_Approval_Cert.pdf',
+    oneDriveUrl: 'https://iconicinvesting-my.sharepoint.com/personal/augustine_a_iconicinvesting_com_au/Documents/Abhijith%20App%20Test/Dr.%20Sophia%20Thornton%20(SMSF)/Other/Moreton_Bay_Dual_Key_Council_Approval_Cert.pdf',
+    oneDriveSyncedAt: '2026-08-26 09:20'
   },
   {
     id: 'doc-receipt-2',
@@ -208,6 +232,10 @@ export const INITIAL_DOCUMENTS: ClientDocument[] = [
     uploadedByName: 'Damian Sterling (Buyers Advocate)',
     uploadedAt: '2026-08-15',
     status: 'Verified',
-    notes: 'Initial strategy & engagement retainer paid in full via direct deposit.'
+    notes: 'Initial strategy & engagement retainer paid in full via direct deposit.',
+    oneDriveSyncStatus: 'synced',
+    oneDrivePath: 'Documents/Abhijith App Test/Dr. Sophia Thornton (SMSF)/Payment Receipts/Iconic_Advocacy_Retainer_Receipt_INV309.pdf',
+    oneDriveUrl: 'https://iconicinvesting-my.sharepoint.com/personal/augustine_a_iconicinvesting_com_au/Documents/Abhijith%20App%20Test/Dr.%20Sophia%20Thornton%20(SMSF)/Payment%20Receipts/Iconic_Advocacy_Retainer_Receipt_INV309.pdf',
+    oneDriveSyncedAt: '2026-08-15 15:00'
   }
 ];
