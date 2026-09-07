@@ -1,5 +1,5 @@
 import dotenv from "dotenv";
-dotenv.config();
+dotenv.config({ override: true });
 
 import express, { Request, Response } from "express";
 import path from "path";
@@ -7,7 +7,14 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import jwt from "jsonwebtoken";
 import { googleDriveService, GoogleDriveUploadResult, GoogleDriveClientFolderProvisionResult } from "./server/googleDriveService";
-import { oneDriveService, OneDriveUploadResult, OneDriveClientFolderProvisionResult } from "./server/onedriveService";
+import {
+  oneDriveService,
+  OneDriveUploadResult,
+  OneDriveClientFolderProvisionResult,
+  buildSharePointWebUrl,
+  buildOneDriveAppUrl,
+  buildOneDriveRootUrl
+} from "./server/onedriveService";
 
 const PORT = 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "iconic-investing-buyers-agency-secret-jwt-key-2026";
@@ -89,7 +96,23 @@ function getGeminiClient() {
 
 async function startServer() {
   const app = express();
-  app.use(express.json({ limit: "10mb" }));
+  // Support uploads up to 250MB with explicit payload limit handling
+  app.use(express.json({ limit: "250mb" }));
+  app.use(express.urlencoded({ limit: "250mb", extended: true }));
+
+  // Global payload size and parse error handler to prevent socket stalls
+  app.use((err: any, req: Request, res: Response, next: any) => {
+    if (err && (err.type === "entity.too.large" || err.status === 413)) {
+      console.warn("[Server] Request entity too large (exceeded 250mb)");
+      return res.status(413).json({
+        error: "File upload is too large. Maximum supported payload size is 250MB."
+      });
+    }
+    if (err && err.status === 400 && "body" in err) {
+      return res.status(400).json({ error: "Invalid JSON format in request payload." });
+    }
+    next(err);
+  });
 
   // API Route: Health Check
   app.get("/api/health", (_req: Request, res: Response) => {
@@ -454,6 +477,58 @@ async function startServer() {
     }
   });
 
+  // 2b. Test specific SharePoint / Microsoft Graph endpoint directly
+  app.post("/api/onedrive/test-endpoint", async (req: Request, res: Response) => {
+    try {
+      const targetUrl = req.body?.targetUrl;
+      const result = await oneDriveService.testSpecificGraphEndpoint(targetUrl);
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || "Failed to test specific Graph endpoint" });
+    }
+  });
+
+  // 2c. Auto-sync all clients as folders in SharePoint Documents/Abhijith App Test/
+  app.post("/api/onedrive/sync-all-clients", async (req: Request, res: Response) => {
+    try {
+      // Default buyers agency investor client list
+      const clientNames = req.body?.clientNames || [
+        "David & Sarah Miller",
+        "Marcus & Elena Vance",
+        "Dr. Sophia Thornton (SMSF)",
+        "James & Priya Patel",
+        "Lucas & Chloe Bennett",
+        "Liam & Harper Robinson"
+      ];
+
+      const results = [];
+      for (const name of clientNames) {
+        if (name && name.trim()) {
+          const resProvision = await oneDriveService.createClientFolders(name.trim());
+          results.push(resProvision);
+        }
+      }
+
+      const tenantDomain = oneDriveService.getConfig().tenantId.includes(".onmicrosoft.com")
+        ? oneDriveService.getConfig().tenantId.replace(".onmicrosoft.com", "")
+        : "iconicinvesting";
+      const userPart = oneDriveService.getConfig().userEmail.replace(/[@.]/g, "_");
+      const basePath = oneDriveService.getConfig().basePath;
+
+      return res.json({
+        success: true,
+        message: `Successfully synchronized ${results.length} client folders into SharePoint/OneDrive at Documents/Abhijith App Test`,
+        clientCount: results.length,
+        results,
+        sharePointUrl: buildSharePointWebUrl(tenantDomain, userPart, basePath),
+        oneDriveAppUrl: buildOneDriveAppUrl(tenantDomain, userPart, basePath),
+        personalRootUrl: buildOneDriveRootUrl(tenantDomain, userPart)
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || "Failed to auto-sync client folders" });
+    }
+  });
+
   // 3. Upload File to OneDrive via Graph PUT
   app.post("/api/onedrive/upload", async (req: Request, res: Response) => {
     try {
@@ -533,14 +608,19 @@ async function startServer() {
   app.get("/api/onedrive/folders", (_req: Request, res: Response) => {
     try {
       const folders = oneDriveService.getStoredFolders();
-      const tenantDomain = oneDriveService.getConfig().tenantId.replace(".onmicrosoft.com", "");
+      const tenantDomain = oneDriveService.getConfig().tenantId.includes(".onmicrosoft.com")
+        ? oneDriveService.getConfig().tenantId.replace(".onmicrosoft.com", "")
+        : "iconicinvesting";
       const userPart = oneDriveService.getConfig().userEmail.replace(/[@.]/g, "_");
+      const basePath = oneDriveService.getConfig().basePath;
       return res.json({
         success: true,
-        basePath: oneDriveService.getConfig().basePath,
+        basePath,
         userEmail: oneDriveService.getConfig().userEmail,
         tenantId: oneDriveService.getConfig().tenantId,
-        sharePointRootUrl: `https://${tenantDomain}-my.sharepoint.com/personal/${userPart}/Documents/${encodeURIComponent(oneDriveService.getConfig().basePath.replace(/^Documents\/?/, ""))}`,
+        sharePointRootUrl: buildSharePointWebUrl(tenantDomain, userPart, basePath),
+        oneDriveAppUrl: buildOneDriveAppUrl(tenantDomain, userPart, basePath),
+        personalRootUrl: buildOneDriveRootUrl(tenantDomain, userPart),
         totalFolders: folders.length,
         folders
       });
@@ -587,19 +667,81 @@ async function startServer() {
         }
       }
 
-      const tenantDomain = oneDriveService.getConfig().tenantId.replace(".onmicrosoft.com", "");
+      const tenantDomain = oneDriveService.getConfig().tenantId.includes(".onmicrosoft.com")
+        ? oneDriveService.getConfig().tenantId.replace(".onmicrosoft.com", "")
+        : "iconicinvesting";
       const userPart = oneDriveService.getConfig().userEmail.replace(/[@.]/g, "_");
+      const basePath = oneDriveService.getConfig().basePath;
 
       return res.json({
         success: true,
         provisionedCount: results.length,
         results,
-        basePath: oneDriveService.getConfig().basePath,
-        sharePointUrl: `https://${tenantDomain}-my.sharepoint.com/personal/${userPart}/Documents/${encodeURIComponent(oneDriveService.getConfig().basePath.replace(/^Documents\/?/, ""))}`
+        basePath,
+        sharePointUrl: buildSharePointWebUrl(tenantDomain, userPart, basePath),
+        oneDriveAppUrl: buildOneDriveAppUrl(tenantDomain, userPart, basePath),
+        personalRootUrl: buildOneDriveRootUrl(tenantDomain, userPart)
       });
     } catch (err: any) {
       console.error("[Azure/OneDrive Batch Error]", err);
       return res.status(500).json({ error: err.message || "Failed to batch provision client folders in OneDrive" });
+    }
+  });
+
+  // 10. Live Provision directly using Microsoft Graph Bearer Token
+  app.post("/api/onedrive/live-provision-with-token", async (req: Request, res: Response) => {
+    try {
+      const { token, clientNames } = req.body;
+      if (!token || !token.trim()) {
+        return res.status(400).json({ error: "Access token is required." });
+      }
+
+      const result = await oneDriveService.liveProvisionWithToken(token.trim(), clientNames);
+      return res.json(result);
+    } catch (err: any) {
+      console.error("[Azure/OneDrive Live Token Provision Error]", err);
+      return res.status(500).json({ error: err.message || "Failed to provision folders with provided token" });
+    }
+  });
+
+  // 11. Update Azure App Configuration (Client ID, Secret, Tenant ID)
+  app.post("/api/onedrive/update-config", async (req: Request, res: Response) => {
+    try {
+      const { clientId, clientSecret, tenantId, userEmail, basePath } = req.body;
+      const updatedConfig = oneDriveService.updateConfig({
+        clientId,
+        clientSecret,
+        tenantId,
+        userEmail,
+        basePath
+      });
+
+      const connectionStatus = await oneDriveService.testConnection();
+      return res.json({
+        success: true,
+        config: {
+          tenantId: updatedConfig.tenantId,
+          userEmail: updatedConfig.userEmail,
+          basePath: updatedConfig.basePath,
+          hasClientId: !!updatedConfig.clientId,
+          hasClientSecret: !!updatedConfig.clientSecret
+        },
+        connectionStatus
+      });
+    } catch (err: any) {
+      console.error("[Azure/OneDrive Update Config Error]", err);
+      return res.status(500).json({ error: err.message || "Failed to update OneDrive configuration" });
+    }
+  });
+
+  // 12. Get Ready-to-Run Setup Scripts (PowerShell, Graph Explorer, CLI)
+  app.get("/api/onedrive/scripts", (_req: Request, res: Response) => {
+    try {
+      const scripts = oneDriveService.getFolderCreationScript();
+      return res.json(scripts);
+    } catch (err: any) {
+      console.error("[Azure/OneDrive Scripts Error]", err);
+      return res.status(500).json({ error: err.message || "Failed to generate scripts" });
     }
   });
 

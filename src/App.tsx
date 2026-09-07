@@ -20,6 +20,8 @@ import { AdminControlPanel } from './components/Admin/AdminControlPanel';
 import { ClientAgentMessaging } from './components/Messages/ClientAgentMessaging';
 import { Cloud, CheckCircle2, X, FolderCheck } from 'lucide-react';
 import { createClientOneDriveFolders, DEFAULT_CLIENT_SUBFOLDERS } from './services/oneDriveClient';
+import { supabase, testSupabaseConnection } from './services/supabaseClient';
+import { createClientSupabaseFolders } from './services/supabaseStorage';
 import { 
   MOCK_CLIENTS, 
   MOCK_PROPERTIES, 
@@ -211,6 +213,17 @@ export default function App() {
           setIsVerifyingSession(false);
         });
     }
+  }, []);
+
+  // Supabase Storage connection test on page load
+  useEffect(() => {
+    testSupabaseConnection().then((status) => {
+      if (status.connected) {
+        console.log('[App] Supabase Storage connected successfully on page load:', status.url);
+      } else {
+        console.warn('[App] Supabase connection status on page load:', status.message);
+      }
+    });
   }, []);
 
   // Automatic state synchronisation to LocalStorage
@@ -486,6 +499,13 @@ export default function App() {
     // Subfolders: Contracts, Building & Pest Reports, Finance Documents, Payment Receipts, ID Verification, Other
     // POST https://graph.microsoft.com/v1.0/users/augustine_a@iconicinvesting.com.au/drive/root:/Documents/Abhijith App Test/{clientName}:/children
     const clientFullName = newClient.fullName || newClient.name;
+
+    // Auto-create Supabase Storage folder structure with .keep placeholder files:
+    // {Client Full Name}/Contracts/.keep, etc.
+    createClientSupabaseFolders(clientFullName).catch(err => {
+      console.warn('[Supabase Storage Auto-Create Warning]', err);
+    });
+
     try {
       console.log(`[OneDrive Auto-Create] Provisioning folders for: ${clientFullName}`);
       const result = await createClientOneDriveFolders(clientFullName);
@@ -555,6 +575,10 @@ export default function App() {
       if (exists) {
         return prev.map(c => c.id === updatedClient.id ? updatedClient : c);
       }
+      const clientFullName = updatedClient.fullName || updatedClient.name;
+      createClientSupabaseFolders(clientFullName).catch(err => {
+        console.warn('[Supabase Storage Auto-Create Warning]', err);
+      });
       return [updatedClient, ...prev];
     });
     setActiveClientId(updatedClient.id);
@@ -566,6 +590,13 @@ export default function App() {
     setActiveClientId(newClient.id);
 
     const clientFullName = newClient.fullName || newClient.name;
+
+    // Auto-create Supabase Storage folder structure with .keep placeholder files:
+    // {Client Full Name}/Contracts/.keep, etc.
+    createClientSupabaseFolders(clientFullName).catch(err => {
+      console.warn('[Supabase Storage Auto-Create Warning]', err);
+    });
+
     try {
       console.log(`[OneDrive Auto-Create] Provisioning folders for: ${clientFullName}`);
       const result = await createClientOneDriveFolders(clientFullName);

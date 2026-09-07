@@ -41,8 +41,10 @@ import {
   Cloud,
   FolderCheck,
   Folder,
-  FolderTree
+  FolderTree,
+  Loader2
 } from 'lucide-react';
+import { uploadClientDocumentToSupabase } from '../../services/supabaseStorage';
 import { OneDriveFolderManagerModal } from '../Documents/OneDriveFolderManagerModal';
 import { 
   DEFAULT_CLIENT_SUBFOLDERS, 
@@ -73,6 +75,7 @@ import {
   resendClientInvitation 
 } from '../../utils/invitations';
 import { EmailInviteModal } from './EmailInviteModal';
+import { SupabaseClientFilesSection } from '../Documents/SupabaseClientFilesSection';
 
 interface AdminControlPanelProps {
   clients: ClientProfile[];
@@ -150,6 +153,7 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
   const [selectedClientForDossier, setSelectedClientForDossier] = useState<ClientProfile | null>(null);
   const [selectedClientForOneDrive, setSelectedClientForOneDrive] = useState<ClientProfile | null>(null);
   const [uploadTargetClientId, setUploadTargetClientId] = useState<string>(clients[0]?.id || '');
+  const [adminSupabaseRefreshKey, setAdminSupabaseRefreshKey] = useState(0);
 
   // Client Invitations (48-hour secure token workflow)
   const [invitations, setInvitations] = useState<ClientInvitation[]>(() => getStoredInvitations());
@@ -1046,6 +1050,7 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
           onUpload={(newDoc) => {
             onUploadDocument(newDoc);
             setIsUploadModalOpen(false);
+            setAdminSupabaseRefreshKey(prev => prev + 1);
             showToast('Document Uploaded', `${newDoc.title} uploaded to ${newDoc.clientName}'s file.`);
           }}
         />
@@ -1057,6 +1062,7 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
       {isDossierOpen && selectedClientForDossier && (
         <ClientDossierDrawer
           client={selectedClientForDossier}
+          refreshTrigger={adminSupabaseRefreshKey}
           documents={documents.filter(d => d.clientId === selectedClientForDossier.id)}
           account={getAccountForClient(selectedClientForDossier)}
           invitation={getInvitationForClient(selectedClientForDossier.id, selectedClientForDossier.email)}
@@ -1416,10 +1422,12 @@ const AddClientModal: React.FC<AddClientModalProps> = ({ isOpen, onClose, onSave
     setTempPassword(res);
   };
 
+  const [formError, setFormError] = useState<string | null>(null);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !email.trim()) {
-      alert('Please enter client name and email address.');
+      setFormError('Please enter client name and email address.');
       return;
     }
 
@@ -2032,18 +2040,25 @@ const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({
 }) => {
   const [selectedClientId, setSelectedClientId] = useState<string>(initialClientId || clients[0]?.id || '');
   const [title, setTitle] = useState('');
-  const [category, setCategory] = useState<DocumentCategory>('Contract of Sale');
+  const [category, setCategory] = useState<DocumentCategory>('Contracts');
   const [propertyAddress, setPropertyAddress] = useState('');
   const [status, setStatus] = useState<'Verified' | 'Pending Review' | 'Under Review'>('Verified');
   const [notes, setNotes] = useState('');
   const [fileName, setFileName] = useState('Contract_Of_Sale_Signed.pdf');
   const [fileSize, setFileSize] = useState('3.8 MB');
+  const [selectedRawFile, setSelectedRawFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadSuccessMsg, setUploadSuccessMsg] = useState(false);
+  const [uploadSuccessDetails, setUploadSuccessDetails] = useState<{ path: string; fileName: string } | null>(null);
 
   const selectedClient = clients.find(c => c.id === selectedClientId) || clients[0];
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      setSelectedRawFile(file);
       setFileName(file.name);
       setFileSize(`${(file.size / (1024 * 1024)).toFixed(1)} MB`);
       if (!title) {
@@ -2052,32 +2067,92 @@ const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !selectedClient) {
-      alert('Please enter document title and select a target client.');
       return;
     }
 
-    const newDoc: ClientDocument = {
-      id: `doc-adm-${Date.now()}`,
-      clientId: selectedClient.id,
-      clientName: selectedClient.name,
-      title: title.trim(),
-      category,
-      fileName,
-      fileSize,
-      fileType: 'PDF',
-      uploadedBy: 'admin',
-      uploadedByName: currentUser.name || 'Advocate Admin',
-      uploadedAt: new Date().toISOString().split('T')[0],
-      propertyAddress: propertyAddress.trim() || undefined,
-      status,
-      notes: notes.trim() || undefined,
-      downloadUrl: '#'
-    };
+    const clientFullName = selectedClient.fullName || selectedClient.name;
+    const formattedFileName = selectedRawFile 
+      ? selectedRawFile.name 
+      : (fileName.includes('.') ? fileName : `${fileName}.pdf`);
 
-    onUpload(newDoc);
+    setIsUploading(true);
+    setUploadProgress(10);
+    setUploadError(null);
+    setUploadSuccessMsg(false);
+
+    try {
+      let fileToUpload: File | Blob;
+      if (selectedRawFile) {
+        fileToUpload = selectedRawFile;
+      } else {
+        const textContent = `=====================================================
+ICONIC INVESTING - CLIENT PROFILE DOCUMENT VAULT
+Document Title: ${title.trim()}
+File Name: ${formattedFileName}
+Category: ${category}
+Client: ${clientFullName}
+Uploaded By: Advocate Admin (${currentUser.name || 'Damian Sterling'})
+Date: ${new Date().toISOString()}
+${propertyAddress ? `Associated Property: ${propertyAddress}\n` : ''}${notes ? `Notes: ${notes}\n` : ''}=====================================================
+Certified in Iconic Investing Supabase Storage Vault (client-documents).
+`;
+        fileToUpload = new Blob([textContent], { type: 'application/pdf' });
+      }
+
+      const uploadResult = await uploadClientDocumentToSupabase({
+        clientFullName,
+        category,
+        file: fileToUpload,
+        customFileName: formattedFileName,
+        onProgress: (p) => setUploadProgress(p)
+      });
+
+      if (!uploadResult.success) {
+        setIsUploading(false);
+        setUploadError(uploadResult.error || 'Failed to upload document to Supabase Storage.');
+        return;
+      }
+
+      const newDoc: ClientDocument = {
+        id: `doc-adm-${Date.now()}`,
+        clientId: selectedClient.id,
+        clientName: clientFullName,
+        title: title.trim(),
+        category,
+        fileName: formattedFileName,
+        fileSize,
+        fileType: selectedRawFile?.type || 'PDF',
+        uploadedBy: 'admin',
+        uploadedByName: currentUser.name || 'Advocate Admin',
+        uploadedAt: new Date().toISOString().split('T')[0],
+        propertyAddress: propertyAddress.trim() || undefined,
+        status,
+        notes: notes.trim() || undefined,
+        downloadUrl: uploadResult.publicUrl || '#'
+      };
+
+      onUpload(newDoc);
+      setIsUploading(false);
+      setUploadProgress(100);
+      setUploadSuccessDetails({
+        path: uploadResult.path || `${clientFullName}/${category}/${formattedFileName}`,
+        fileName: formattedFileName
+      });
+      setUploadSuccessMsg(true);
+
+      setTimeout(() => {
+        setUploadSuccessMsg(false);
+        setUploadSuccessDetails(null);
+        onClose();
+      }, 1600);
+    } catch (err: any) {
+      console.error('[AdminUploadModal] Upload error:', err);
+      setIsUploading(false);
+      setUploadError(err?.message || 'An unexpected error occurred during upload.');
+    }
   };
 
   return (
@@ -2137,12 +2212,12 @@ const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({
                 onChange={(e) => setCategory(e.target.value as any)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 font-medium"
               >
-                <option value="Contract of Sale">Contract of Sale</option>
-                <option value="Building & Pest">Building & Pest Report</option>
-                <option value="Pre-Approval & Finance">Pre-Approval & Finance</option>
-                <option value="Settlement & PEXA">Settlement & PEXA</option>
-                <option value="Proof of ID & Entity">Proof of ID & Entity</option>
-                <option value="Due Diligence & Title">Due Diligence & Title</option>
+                <option value="Contracts">Contracts</option>
+                <option value="Building & Pest Reports">Building & Pest Reports</option>
+                <option value="Finance Documents">Finance Documents</option>
+                <option value="Payment Receipts">Payment Receipts</option>
+                <option value="ID Verification">ID Verification</option>
+                <option value="Other">Other</option>
               </select>
             </div>
 
@@ -2184,7 +2259,7 @@ const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({
               <label htmlFor="admin-doc-file-input" className="cursor-pointer">
                 <FileText className="w-8 h-8 text-amber-600 mx-auto mb-1.5" />
                 <div className="font-semibold text-slate-800 text-xs">
-                  {fileName} <span className="text-slate-400">({fileSize})</span>
+                  {selectedRawFile ? selectedRawFile.name : fileName} <span className="text-slate-400">({fileSize})</span>
                 </div>
                 <div className="text-[11px] text-slate-500 mt-1">
                   Click to select file from desktop or drag & drop (PDF, DOCX, PNG)
@@ -2205,20 +2280,82 @@ const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({
             />
           </div>
 
+          {/* Upload Progress Bar */}
+          {isUploading && (
+            <div className="p-3 bg-blue-50/80 border border-blue-200 rounded-xl space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-[#1A3A5C]">
+                <span className="flex items-center gap-1.5">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-[#B8960C]" />
+                  Uploading to Supabase Storage (client-documents)...
+                </span>
+                <span className="font-mono text-slate-700">{uploadProgress}%</span>
+              </div>
+              <div className="w-full bg-blue-200/60 rounded-full h-2 overflow-hidden">
+                <div
+                  className="bg-gradient-to-r from-[#1A3A5C] to-[#B8960C] h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+              <div className="text-[10px] text-slate-500 font-mono truncate">
+                Path: {selectedClient.fullName || selectedClient.name}/{category}/{selectedRawFile?.name || fileName}
+              </div>
+            </div>
+          )}
+
+          {/* Error Message */}
+          {uploadError && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <div className="space-y-0.5 flex-1">
+                <div className="font-bold text-rose-900">Upload Failed</div>
+                <div className="text-[11px] text-rose-700 leading-relaxed">{uploadError}</div>
+              </div>
+            </div>
+          )}
+
+          {/* Success Message */}
+          {uploadSuccessMsg && (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 text-xs flex items-start gap-2 font-semibold">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <div className="space-y-0.5 flex-1">
+                <div className="font-bold text-emerald-900">Document Uploaded to Supabase!</div>
+                <div className="text-[11px] text-emerald-700 font-normal">
+                  Saved to bucket <code className="font-mono text-[10px] bg-emerald-100 px-1 py-0.5 rounded">client-documents</code>
+                  {uploadSuccessDetails && (
+                    <div className="font-mono text-[10px] text-emerald-800 mt-1 truncate">
+                      {uploadSuccessDetails.path}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
             <button
               type="button"
+              disabled={isUploading}
               onClick={onClose}
-              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors"
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors cursor-pointer disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow transition-colors flex items-center gap-2"
+              disabled={isUploading}
+              className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
             >
-              <Upload className="w-4 h-4" />
-              Upload & Save to Client Vault
+              {isUploading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  <span>Uploading to Supabase...</span>
+                </>
+              ) : (
+                <>
+                  <Upload className="w-4 h-4" />
+                  <span>Upload & Save to Client Vault</span>
+                </>
+              )}
             </button>
           </div>
         </form>
@@ -2236,6 +2373,7 @@ interface ClientDossierDrawerProps {
   documents: ClientDocument[];
   account?: UserAccount;
   invitation?: ClientInvitation;
+  refreshTrigger?: number | string;
   onViewInvitationEmail?: () => void;
   onResendInvitation?: () => void;
   onOpenInviteToken?: (token: string) => void;
@@ -2250,6 +2388,7 @@ const ClientDossierDrawer: React.FC<ClientDossierDrawerProps> = ({
   documents,
   account,
   invitation,
+  refreshTrigger,
   onViewInvitationEmail,
   onResendInvitation,
   onOpenInviteToken,
@@ -2541,6 +2680,15 @@ Access URL: https://iconic-investing.com.au`;
                   ))}
                 </div>
               )}
+            </div>
+
+            {/* Supabase Storage Files Vault (Prompt 3: Grouped by category subfolder with View & Delete) */}
+            <div className="pt-2">
+              <SupabaseClientFilesSection
+                clientFullName={client.fullName || client.name}
+                refreshTrigger={refreshTrigger}
+                title="Supabase Storage Vault"
+              />
             </div>
           </div>
         </div>

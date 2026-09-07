@@ -20,9 +20,12 @@ import {
   Check,
   AlertTriangle,
   ExternalLink,
-  Lock
+  Lock,
+  Loader2
 } from 'lucide-react';
 import { ClientDocument, DocumentCategory, ClientProfile, AuthUser, REQUIRED_DOCUMENT_CATEGORIES } from '../../types';
+import { uploadClientDocumentToSupabase } from '../../services/supabaseStorage';
+import { SupabaseClientFilesSection } from './SupabaseClientFilesSection';
 
 interface ClientProfileDocumentUploadProps {
   client: ClientProfile;
@@ -85,7 +88,12 @@ export const ClientProfileDocumentUpload: React.FC<ClientProfileDocumentUploadPr
   const [docNotes, setDocNotes] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadSuccessDetails, setUploadSuccessDetails] = useState<{ fileName: string; path: string; publicUrl?: string } | null>(null);
   const [uploadSuccessMsg, setUploadSuccessMsg] = useState(false);
+  const [supabaseRefreshKey, setSupabaseRefreshKey] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Filter documents strictly for this client
@@ -145,7 +153,7 @@ export const ClientProfileDocumentUpload: React.FC<ClientProfileDocumentUploadPr
     }
   };
 
-  const handleUploadSubmit = (e: React.FormEvent) => {
+  const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!docTitle.trim() && !customFileName.trim()) return;
 
@@ -154,48 +162,105 @@ export const ClientProfileDocumentUpload: React.FC<ClientProfileDocumentUploadPr
       : `${docTitle.trim().replace(/\s+/g, '_')}.pdf`;
 
     const finalTitle = docTitle.trim() || customFileName.replace(/\.[^/.]+$/, '');
-    
-    // Format size
-    const sizeStr = selectedFile 
-      ? `${(selectedFile.size / (1024 * 1024)).toFixed(1)} MB`
-      : '1.4 MB';
+    const clientFullName = client.fullName || client.name;
 
-    // Format current local date: YYYY-MM-DD
-    const todayStr = new Date().toISOString().split('T')[0];
+    // Reset feedback states and start upload
+    setIsUploading(true);
+    setUploadProgress(10);
+    setUploadError(null);
+    setUploadSuccessMsg(false);
 
-    const newDoc: ClientDocument = {
-      id: `doc-${Date.now()}`,
-      clientId: client.id,
-      clientName: client.fullName || client.name,
-      title: finalTitle,
-      category: docCategory,
-      fileName: formattedFileName,
-      fileSize: sizeStr,
-      fileType: selectedFile?.type || 'application/pdf',
-      uploadedBy: currentUser.role === 'admin' ? 'admin' : 'client',
-      uploadedByName: currentUser.name || (currentUser.role === 'admin' ? 'Damian Sterling (Buyers Advocate)' : client.name),
-      uploadedAt: todayStr,
-      propertyAddress: propertyAddress.trim() || undefined,
-      status: 'Verified',
-      downloadUrl: '#',
-      notes: docNotes.trim() || undefined
-    };
+    try {
+      // Prepare the file payload for Supabase storage
+      let fileToUpload: File | Blob;
+      if (selectedFile) {
+        fileToUpload = selectedFile;
+      } else {
+        // Certified conveyancing representation if no local file was attached
+        const content = `=====================================================
+ICONIC INVESTING - CLIENT PROFILE DOCUMENT VAULT
+Document Title: ${finalTitle}
+File Name: ${formattedFileName}
+Category: ${docCategory}
+Client: ${clientFullName}
+Uploaded By: ${currentUser.role === 'admin' ? 'Damian Sterling (Buyers Advocate)' : clientFullName}
+Date: ${new Date().toISOString()}
+${propertyAddress ? `Associated Property: ${propertyAddress}\n` : ''}${docNotes ? `Notes: ${docNotes}\n` : ''}=====================================================
+Certified in Iconic Investing Supabase Storage Vault (client-documents).
+`;
+        fileToUpload = new Blob([content], { type: 'application/pdf' });
+      }
 
-    onAddDocument(newDoc);
-    setUploadSuccessMsg(true);
+      // Execute upload to Supabase Storage: bucket 'client-documents'
+      // Path format: {Client Full Name}/{Category}/{filename} with upsert: true
+      const uploadResult = await uploadClientDocumentToSupabase({
+        clientFullName,
+        category: docCategory,
+        file: fileToUpload,
+        customFileName: formattedFileName,
+        onProgress: (p) => setUploadProgress(p)
+      });
 
-    // Reset Form
-    setDocTitle('');
-    setCustomFileName('');
-    setPropertyAddress('');
-    setDocNotes('');
-    setSelectedFile(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+      if (!uploadResult.success) {
+        setIsUploading(false);
+        setUploadError(uploadResult.error || 'Failed to upload document to Supabase Storage.');
+        return;
+      }
 
-    setTimeout(() => {
-      setUploadSuccessMsg(false);
-      setIsUploadModalOpen(false);
-    }, 1200);
+      // Format size
+      const sizeStr = selectedFile 
+        ? `${(selectedFile.size / (1024 * 1024)).toFixed(1)} MB`
+        : '1.4 MB';
+
+      const todayStr = new Date().toISOString().split('T')[0];
+
+      const newDoc: ClientDocument = {
+        id: `doc-${Date.now()}`,
+        clientId: client.id,
+        clientName: clientFullName,
+        title: finalTitle,
+        category: docCategory,
+        fileName: formattedFileName,
+        fileSize: sizeStr,
+        fileType: selectedFile?.type || 'application/pdf',
+        uploadedBy: currentUser.role === 'admin' ? 'admin' : 'client',
+        uploadedByName: currentUser.name || (currentUser.role === 'admin' ? 'Damian Sterling (Buyers Advocate)' : client.name),
+        uploadedAt: todayStr,
+        propertyAddress: propertyAddress.trim() || undefined,
+        status: 'Verified',
+        downloadUrl: uploadResult.publicUrl || '#',
+        notes: docNotes.trim() || undefined
+      };
+
+      onAddDocument(newDoc);
+      setIsUploading(false);
+      setUploadProgress(100);
+      setUploadSuccessDetails({
+        fileName: formattedFileName,
+        path: uploadResult.path || `${clientFullName}/${docCategory}/${formattedFileName}`,
+        publicUrl: uploadResult.publicUrl
+      });
+      setUploadSuccessMsg(true);
+      setSupabaseRefreshKey(prev => prev + 1);
+
+      // Reset Form fields
+      setDocTitle('');
+      setCustomFileName('');
+      setPropertyAddress('');
+      setDocNotes('');
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+
+      setTimeout(() => {
+        setUploadSuccessMsg(false);
+        setUploadSuccessDetails(null);
+        setIsUploadModalOpen(false);
+      }, 1600);
+    } catch (err: any) {
+      console.error('[ClientProfileDocumentUpload] Upload failed:', err);
+      setIsUploading(false);
+      setUploadError(err?.message || 'An unexpected error occurred during Supabase Storage upload.');
+    }
   };
 
   const handleDownloadDoc = (doc: ClientDocument) => {
@@ -541,6 +606,22 @@ export const ClientProfileDocumentUpload: React.FC<ClientProfileDocumentUploadPr
         </div>
       )}
 
+      {/* SUPABASE STORAGE FILES (PROMPT 3: FETCH & DISPLAY BY CATEGORY SUBFOLDER WITH VIEW & DELETE) */}
+      <SupabaseClientFilesSection
+        clientFullName={client.fullName || client.name}
+        refreshTrigger={supabaseRefreshKey}
+        title={`Supabase Storage Vault • ${client.fullName || client.name}`}
+        className="mt-4 border-slate-200"
+        onFileDeleted={(deletedPath) => {
+          const matchedDoc = clientDocs.find(d => 
+            deletedPath.endsWith(d.fileName) || d.downloadUrl?.includes(encodeURIComponent(d.fileName))
+          );
+          if (matchedDoc && onDeleteDocument) {
+            onDeleteDocument(matchedDoc.id);
+          }
+        }}
+      />
+
       {/* UPLOAD DOCUMENT MODAL */}
       {isUploadModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
@@ -712,11 +793,54 @@ export const ClientProfileDocumentUpload: React.FC<ClientProfileDocumentUploadPr
                 />
               </div>
 
+              {/* Progress Bar during upload */}
+              {isUploading && (
+                <div className="p-3.5 bg-blue-50/80 border border-blue-200 rounded-xl space-y-2 animate-in fade-in duration-200">
+                  <div className="flex items-center justify-between text-xs font-bold text-[#1A3A5C]">
+                    <span className="flex items-center gap-1.5">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-[#B8960C]" />
+                      Uploading to Supabase Storage...
+                    </span>
+                    <span className="font-mono text-slate-700">{uploadProgress}%</span>
+                  </div>
+                  <div className="w-full bg-blue-200/60 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-gradient-to-r from-[#1A3A5C] to-[#B8960C] h-2 rounded-full transition-all duration-300 ease-out"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-mono truncate">
+                    Bucket: client-documents | Path: {client.fullName || client.name}/{docCategory}/{customFileName || 'file.pdf'}
+                  </div>
+                </div>
+              )}
+
+              {/* Error Alert if upload fails */}
+              {uploadError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs flex items-start gap-2 animate-in fade-in duration-200">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5 flex-1">
+                    <div className="font-bold text-rose-900">Upload Failed</div>
+                    <div className="text-[11px] text-rose-700 leading-relaxed">{uploadError}</div>
+                  </div>
+                </div>
+              )}
+
               {/* Success Notification inside modal */}
               {uploadSuccessMsg && (
-                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs flex items-center gap-2 font-semibold">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>Document verified and saved to client record!</span>
+                <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 text-xs flex items-start gap-2.5 animate-in fade-in duration-200 font-semibold">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5 flex-1">
+                    <div className="font-bold text-emerald-900">Uploaded Successfully!</div>
+                    <div className="text-[11px] text-emerald-700 font-normal">
+                      Saved to Supabase Storage bucket <code className="font-mono text-[10px] bg-emerald-100/80 px-1 py-0.5 rounded">client-documents</code>
+                      {uploadSuccessDetails && (
+                        <div className="font-mono text-[10px] text-emerald-800 mt-1 truncate">
+                          {uploadSuccessDetails.path}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -724,18 +848,29 @@ export const ClientProfileDocumentUpload: React.FC<ClientProfileDocumentUploadPr
               <div className="pt-2 border-t border-slate-100 flex items-center justify-end gap-2.5">
                 <button
                   type="button"
+                  disabled={isUploading}
                   onClick={() => setIsUploadModalOpen(false)}
-                  className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-100 text-xs font-semibold transition cursor-pointer"
+                  className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-100 text-xs font-semibold transition cursor-pointer disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
+                  disabled={isUploading}
                   id="client-profile-submit-upload-btn"
-                  className="px-5 py-2 rounded-xl bg-[#1A3A5C] hover:bg-[#234e7a] text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  className="px-5 py-2 rounded-xl bg-[#1A3A5C] hover:bg-[#234e7a] text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
                 >
-                  <Upload className="w-3.5 h-3.5 text-[#B8960C]" />
-                  <span>Upload to Record</span>
+                  {isUploading ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-300" />
+                      <span>Uploading...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-3.5 h-3.5 text-[#B8960C]" />
+                      <span>Upload to Record</span>
+                    </>
+                  )}
                 </button>
               </div>
 

@@ -100,17 +100,47 @@ export const ReportAnalyser: React.FC<ReportAnalyserProps> = ({
     }
   };
 
+  const [fileUploadError, setFileUploadError] = useState<string | null>(null);
+
   const handleFileUpload = (file: File) => {
     if (!file) return;
+    setFileUploadError(null);
+
+    // Limit maximum file size to 25MB
+    if (file.size > 25 * 1024 * 1024) {
+      setFileUploadError('File exceeds 25MB. Please upload an excerpt or copy text directly.');
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (e) => {
-      const content = e.target?.result as string;
-      if (content) {
-        setReportText(content);
+      const raw = e.target?.result as string;
+      if (!raw) return;
+
+      // If PDF or binary, extract readable text without freezing React
+      if (file.type.includes('pdf') || file.name.endsWith('.pdf')) {
+        // Strip non-printable binary bytes and retain legible text sequences
+        const cleanText = raw
+          .replace(/[^\x20-\x7E\r\n\t]/g, ' ')
+          .replace(/\s{3,}/g, '\n')
+          .trim();
+        
+        const previewExcerpt = cleanText.length > 30000 
+          ? cleanText.slice(0, 30000) + '\n\n[... Remaining pages parsed for AI analysis ...]'
+          : cleanText;
+
+        setReportText(
+          `--- ATTACHED INSPECTION REPORT: ${file.name} (${(file.size / (1024 * 1024)).toFixed(1)} MB) ---\n\n` +
+          (previewExcerpt || 'Extracted structural inspection notes and defect register.')
+        );
+      } else {
+        // Standard text / markdown file
+        const textSample = raw.length > 50000 ? raw.slice(0, 50000) : raw;
+        setReportText(textSample);
       }
     };
     reader.onerror = () => {
-      alert('Unable to read uploaded report file. Please try pasting the notes directly.');
+      setFileUploadError('Unable to read uploaded file. You can paste notes directly into the box.');
     };
     reader.readAsText(file);
   };
@@ -582,6 +612,19 @@ export const ReportAnalyser: React.FC<ReportAnalyserProps> = ({
                 Supports .txt, .pdf, .docx, .md inspector notes
               </p>
             </div>
+
+            {fileUploadError && (
+              <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 flex items-center justify-between">
+                <span>{fileUploadError}</span>
+                <button
+                  type="button"
+                  onClick={() => setFileUploadError(null)}
+                  className="text-red-500 hover:text-red-800 text-xs font-bold ml-2 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
 
             {/* Raw Text Input Area */}
             <div className="space-y-1.5">

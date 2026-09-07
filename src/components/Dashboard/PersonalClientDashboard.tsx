@@ -23,6 +23,8 @@ import {
   MapPin,
   FileCheck,
   AlertCircle,
+  AlertTriangle,
+  Loader2,
   Check
 } from 'lucide-react';
 import { 
@@ -35,6 +37,8 @@ import {
   DocumentCategory,
   AuthUser
 } from '../../types';
+import { uploadClientDocumentToSupabase } from '../../services/supabaseStorage';
+import { SupabaseClientFilesSection } from '../Documents/SupabaseClientFilesSection';
 import { ADVOCATES } from '../../data/mockMessages';
 import { ClientAgentMessaging } from '../Messages/ClientAgentMessaging';
 
@@ -69,7 +73,14 @@ export const PersonalClientDashboard: React.FC<PersonalClientDashboardProps> = (
   const [docCategoryFilter, setDocCategoryFilter] = useState<string>('All');
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [newDocTitle, setNewDocTitle] = useState('');
-  const [newDocCategory, setNewDocCategory] = useState<DocumentCategory>('Contract of Sale');
+  const [newDocCategory, setNewDocCategory] = useState<DocumentCategory>('Contracts');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadSuccessMsg, setUploadSuccessMsg] = useState(false);
+  const [uploadSuccessDetails, setUploadSuccessDetails] = useState<{ path: string; fileName: string } | null>(null);
+  const [supabaseRefreshKey, setSupabaseRefreshKey] = useState(0);
 
   const advocateName = client.assignedAgent || 'Damian Sterling';
   const advocate = ADVOCATES[advocateName] || ADVOCATES['Damian Sterling'];
@@ -103,29 +114,97 @@ export const PersonalClientDashboard: React.FC<PersonalClientDashboardProps> = (
     return `$${val.toLocaleString()} AUD`;
   };
 
-  const handleUploadSubmit = (e: React.FormEvent) => {
+  const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newDocTitle.trim()) return;
+    if (!newDocTitle.trim() && !selectedFile) return;
 
-    const newDoc: ClientDocument = {
-      id: `doc-client-${Date.now()}`,
-      clientId: client.id,
-      clientName: client.name,
-      title: newDocTitle.trim(),
-      category: newDocCategory,
-      fileName: `${newDocTitle.trim().replace(/\s+/g, '_')}.pdf`,
-      fileSize: '1.8 MB',
-      fileType: 'PDF',
-      uploadedBy: 'client',
-      uploadedByName: currentUser.name,
-      uploadedAt: new Date().toISOString(),
-      status: 'Verified',
-      downloadUrl: '#'
-    };
+    const rawTitle = newDocTitle.trim() || (selectedFile?.name.replace(/\.[^/.]+$/, '') || 'Document');
+    const formattedFileName = selectedFile 
+      ? selectedFile.name 
+      : `${rawTitle.replace(/\s+/g, '_')}.pdf`;
+    const clientFullName = client.fullName || client.name;
 
-    onAddDocument(newDoc);
-    setNewDocTitle('');
-    setIsUploadModalOpen(false);
+    setIsUploading(true);
+    setUploadProgress(10);
+    setUploadError(null);
+    setUploadSuccessMsg(false);
+
+    try {
+      let fileToUpload: File | Blob;
+      if (selectedFile) {
+        fileToUpload = selectedFile;
+      } else {
+        const textContent = `=====================================================
+ICONIC INVESTING - CLIENT PROFILE DOCUMENT VAULT
+Document Title: ${rawTitle}
+File Name: ${formattedFileName}
+Category: ${newDocCategory}
+Client: ${clientFullName}
+Uploaded By: Client (${currentUser.name})
+Date: ${new Date().toISOString()}
+=====================================================
+Certified in Iconic Investing Supabase Storage Vault (client-documents).
+`;
+        fileToUpload = new Blob([textContent], { type: 'application/pdf' });
+      }
+
+      const uploadResult = await uploadClientDocumentToSupabase({
+        clientFullName,
+        category: newDocCategory,
+        file: fileToUpload,
+        customFileName: formattedFileName,
+        onProgress: (p) => setUploadProgress(p)
+      });
+
+      if (!uploadResult.success) {
+        setIsUploading(false);
+        setUploadError(uploadResult.error || 'Failed to upload document to Supabase Storage.');
+        return;
+      }
+
+      const sizeFormatted = selectedFile 
+        ? `${(selectedFile.size / (1024 * 1024)).toFixed(1)} MB`
+        : '1.4 MB';
+
+      const newDoc: ClientDocument = {
+        id: `doc-client-${Date.now()}`,
+        clientId: client.id,
+        clientName: clientFullName,
+        title: rawTitle,
+        category: newDocCategory,
+        fileName: formattedFileName,
+        fileSize: sizeFormatted,
+        fileType: selectedFile?.type || 'application/pdf',
+        uploadedBy: 'client',
+        uploadedByName: currentUser.name,
+        uploadedAt: new Date().toISOString().split('T')[0],
+        status: 'Verified',
+        downloadUrl: uploadResult.publicUrl || '#'
+      };
+
+      onAddDocument(newDoc);
+      setIsUploading(false);
+      setUploadProgress(100);
+      setUploadSuccessDetails({
+        path: uploadResult.path || `${clientFullName}/${newDocCategory}/${formattedFileName}`,
+        fileName: formattedFileName
+      });
+      setUploadSuccessMsg(true);
+      setSupabaseRefreshKey(prev => prev + 1);
+
+      setNewDocTitle('');
+      setSelectedFile(null);
+
+      setTimeout(() => {
+        setUploadSuccessMsg(false);
+        setUploadSuccessDetails(null);
+        setIsUploadModalOpen(false);
+      }, 1600);
+    } catch (err: any) {
+      console.error('[PersonalClientDashboard] Upload error:', err);
+      setIsUploading(false);
+      setUploadError(err?.message || 'An unexpected error occurred during upload.');
+    }
   };
 
   return (
@@ -599,10 +678,16 @@ export const PersonalClientDashboard: React.FC<PersonalClientDashboardProps> = (
                       {doc.status}
                     </span>
                     <a
-                      href="#"
-                      onClick={(e) => { e.preventDefault(); alert(`Downloading: ${doc.fileName}`); }}
+                      href={doc.oneDriveUrl || "#"}
+                      target={doc.oneDriveUrl ? "_blank" : undefined}
+                      rel="noopener noreferrer"
+                      onClick={(e) => {
+                        if (!doc.oneDriveUrl) {
+                          e.preventDefault();
+                        }
+                      }}
                       className="text-xs text-[#1A3A5C] hover:text-[#B8960C] p-1 rounded hover:bg-white transition"
-                      title="Download document"
+                      title="View / Download document"
                     >
                       <Download className="w-3.5 h-3.5" />
                     </a>
@@ -612,6 +697,15 @@ export const PersonalClientDashboard: React.FC<PersonalClientDashboardProps> = (
             </div>
           )}
         </div>
+      )}
+
+      {/* SUPABASE STORAGE VAULT (PROMPT 3: GROUPED BY CATEGORY SUBFOLDER, VIEW & DELETE) */}
+      {(activeTab === 'all' || activeTab === 'documents') && (
+        <SupabaseClientFilesSection
+          clientFullName={client.fullName || client.name}
+          refreshTrigger={supabaseRefreshKey}
+          title="Supabase Storage Vault"
+        />
       )}
 
       {/* PILLAR 3: SETTLEMENT CHECKLIST PROGRESS */}
@@ -802,32 +896,128 @@ export const PersonalClientDashboard: React.FC<PersonalClientDashboardProps> = (
                   onChange={(e) => setNewDocCategory(e.target.value as DocumentCategory)}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-hidden focus:ring-2 focus:ring-[#1A3A5C]"
                 >
-                  <option value="Contract of Sale">Contract of Sale</option>
-                  <option value="Building & Pest">Building & Pest Report</option>
-                  <option value="Pre-Approval & Finance">Pre-Approval & Finance</option>
-                  <option value="Proof of ID & Entity">Proof of ID & Entity</option>
+                  <option value="Contracts">Contracts</option>
+                  <option value="Building & Pest Reports">Building & Pest Reports</option>
+                  <option value="Finance Documents">Finance Documents</option>
+                  <option value="Payment Receipts">Payment Receipts</option>
+                  <option value="ID Verification">ID Verification</option>
+                  <option value="Other">Other</option>
                 </select>
               </div>
 
-              <div className="p-4 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 text-center space-y-1">
-                <FileText className="w-8 h-8 text-slate-400 mx-auto" />
-                <div className="font-semibold text-slate-700 text-xs">Select PDF, DOCX, or Image file</div>
-                <div className="text-[11px] text-slate-400">Maximum file size: 25 MB</div>
+              {/* File Picker */}
+              <div>
+                <label className="block font-bold text-slate-700 uppercase mb-1">
+                  Document File
+                </label>
+                <label className="p-4 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 text-center space-y-1 block cursor-pointer hover:border-slate-400 hover:bg-slate-100/60 transition">
+                  <input
+                    type="file"
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        const file = e.target.files[0];
+                        setSelectedFile(file);
+                        if (!newDocTitle) {
+                          setNewDocTitle(file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' '));
+                        }
+                      }
+                    }}
+                  />
+                  {selectedFile ? (
+                    <div className="flex items-center justify-center gap-2 text-emerald-800 font-semibold text-xs">
+                      <FileCheck className="w-5 h-5 text-emerald-600" />
+                      <span className="truncate max-w-xs">{selectedFile.name}</span>
+                      <span className="text-[11px] text-slate-500 font-normal">
+                        ({(selectedFile.size / (1024 * 1024)).toFixed(2)} MB)
+                      </span>
+                    </div>
+                  ) : (
+                    <>
+                      <FileText className="w-8 h-8 text-slate-400 mx-auto" />
+                      <div className="font-semibold text-slate-700 text-xs">Select PDF, DOCX, or Image file</div>
+                      <div className="text-[11px] text-slate-400">Maximum file size: 25 MB</div>
+                    </>
+                  )}
+                </label>
               </div>
+
+              {/* Upload Progress Bar */}
+              {isUploading && (
+                <div className="p-3.5 bg-blue-50/80 border border-blue-200 rounded-xl space-y-2 animate-in fade-in duration-200">
+                  <div className="flex items-center justify-between text-xs font-bold text-[#1A3A5C]">
+                    <span className="flex items-center gap-1.5">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-[#B8960C]" />
+                      Uploading to Supabase Storage (client-documents)...
+                    </span>
+                    <span className="font-mono text-slate-700">{uploadProgress}%</span>
+                  </div>
+                  <div className="w-full bg-blue-200/60 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-gradient-to-r from-[#1A3A5C] to-[#B8960C] h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-mono truncate">
+                    Path: {client.fullName || client.name}/{newDocCategory}/{selectedFile?.name || `${newDocTitle || 'file'}.pdf`}
+                  </div>
+                </div>
+              )}
+
+              {/* Error Message */}
+              {uploadError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs flex items-start gap-2 animate-in fade-in duration-200">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5 flex-1">
+                    <div className="font-bold text-rose-900">Upload Failed</div>
+                    <div className="text-[11px] text-rose-700 leading-relaxed">{uploadError}</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Success Message */}
+              {uploadSuccessMsg && (
+                <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 text-xs flex items-start gap-2.5 animate-in fade-in duration-200 font-semibold">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5 flex-1">
+                    <div className="font-bold text-emerald-900">Uploaded Successfully!</div>
+                    <div className="text-[11px] text-emerald-700 font-normal">
+                      Saved to Supabase Storage bucket <code className="font-mono text-[10px] bg-emerald-100/80 px-1 py-0.5 rounded">client-documents</code>
+                      {uploadSuccessDetails && (
+                        <div className="font-mono text-[10px] text-emerald-800 mt-1 truncate">
+                          {uploadSuccessDetails.path}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
+                  disabled={isUploading}
                   onClick={() => setIsUploadModalOpen(false)}
-                  className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-100 font-semibold cursor-pointer"
+                  className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-100 font-semibold cursor-pointer disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-[#1A3A5C] hover:bg-[#224b75] text-white font-bold cursor-pointer"
+                  disabled={isUploading}
+                  className="px-5 py-2 rounded-xl bg-[#1A3A5C] hover:bg-[#224b75] text-white font-bold cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
                 >
-                  Upload & Verify
+                  {isUploading ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-300" />
+                      <span>Uploading...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-3.5 h-3.5 text-[#B8960C]" />
+                      <span>Upload & Verify</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>

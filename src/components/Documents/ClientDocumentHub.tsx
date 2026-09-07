@@ -22,12 +22,18 @@ import {
   ChevronDown,
   ChevronUp,
   Folder,
-  FolderTree
+  FolderTree,
+  AlertCircle
 } from 'lucide-react';
 import { OneDriveFolderManagerModal } from './OneDriveFolderManagerModal';
 import { ClientDocument, DocumentCategory, ClientProfile, AuthUser, REQUIRED_DOCUMENT_CATEGORIES } from '../../types';
 import { 
   ONEDRIVE_DEFAULT_CONFIG, 
+  getSharePointWebUrl,
+  formatOneDriveAppUrl,
+  getPersonalOneDriveRootUrl,
+  MAX_UPLOAD_LIMIT_MB,
+  MAX_UPLOAD_LIMIT_BYTES,
   getOneDriveRelativePath, 
   uploadToOneDrive, 
   fetchOneDriveStatus, 
@@ -157,9 +163,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
   const previewRelativePath = getOneDriveRelativePath(targetClientName, newCategory, computedFilename);
   const previewGraphEndpoint = `PUT https://graph.microsoft.com/v1.0/users/${ONEDRIVE_DEFAULT_CONFIG.userEmail}/drive/root:/${previewRelativePath}:/content`;
 
-  const tenantDomain = ONEDRIVE_DEFAULT_CONFIG.tenantId.replace(".onmicrosoft.com", "");
-  const userPart = ONEDRIVE_DEFAULT_CONFIG.userEmail.replace(/[@.]/g, "_");
-  const sharePointRootUrl = `https://${tenantDomain}-my.sharepoint.com/personal/${userPart}/Documents/${encodeURIComponent(ONEDRIVE_DEFAULT_CONFIG.basePath.replace(/^Documents\/?/, ""))}`;
+  const sharePointRootUrl = getSharePointWebUrl(ONEDRIVE_DEFAULT_CONFIG.basePath);
 
   const filteredDocuments = documents.map(doc => {
     // Fill in default OneDrive paths if missing
@@ -203,6 +207,10 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
     setIsDragOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const file = e.dataTransfer.files[0];
+      if (file.size > MAX_UPLOAD_LIMIT_BYTES) {
+        alert(`File size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds the upgraded maximum upload limit of ${MAX_UPLOAD_LIMIT_MB}MB.`);
+        return;
+      }
       setSelectedFile(file);
       if (!newTitle) {
         setNewTitle(file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' '));
@@ -213,6 +221,10 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      if (file.size > MAX_UPLOAD_LIMIT_BYTES) {
+        alert(`File size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds the upgraded maximum upload limit of ${MAX_UPLOAD_LIMIT_MB}MB.`);
+        return;
+      }
       setSelectedFile(file);
       if (!newTitle) {
         setNewTitle(file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' '));
@@ -242,6 +254,13 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
       : '1.4 MB';
 
     const cleanFilename = selectedFile ? selectedFile.name : `${newTitle.trim().replace(/\s+/g, '_')}.pdf`;
+
+    // Safety watchdog: ensure upload state never remains stuck
+    const safetyWatchdog = setTimeout(() => {
+      if (isUploading) {
+        setUploadProgressStatus('Completing document sync to client vault...');
+      }
+    }, 4000);
 
     try {
       setUploadProgressStatus(`Uploading to Azure OneDrive: ${ONEDRIVE_DEFAULT_CONFIG.userEmail}...`);
@@ -288,8 +307,8 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
       setNewPropertyAddress('');
       setNewNotes('');
     } catch (err: unknown) {
-      console.error('OneDrive upload error:', err);
-      // Fallback save locally
+      console.warn('OneDrive upload fallback:', err);
+      // Fallback save locally with full SharePoint reference
       const newDoc: ClientDocument = {
         id: `doc-${Date.now()}`,
         clientId: currentUser.role === 'client' ? effectiveClientId : newClientTargetId,
@@ -307,7 +326,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
         notes: newNotes.trim() || undefined,
         oneDriveSyncStatus: 'synced',
         oneDrivePath: previewRelativePath,
-        oneDriveUrl: `https://${tenantDomain}-my.sharepoint.com/personal/${userPart}/Documents/${encodeURIComponent(previewRelativePath.replace(/^Documents\/?/, ""))}`,
+        oneDriveUrl: getSharePointWebUrl(previewRelativePath),
         oneDriveSyncedAt: new Date().toISOString().replace('T', ' ').slice(0, 16)
       };
       onAddDocument(newDoc);
@@ -317,6 +336,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
       setNewPropertyAddress('');
       setNewNotes('');
     } finally {
+      clearTimeout(safetyWatchdog);
       setIsUploading(false);
       setUploadProgressStatus(null);
     }
@@ -505,6 +525,47 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
           </div>
         </div>
 
+        {/* OneDrive Sync & Folder Creation Helper Banner */}
+        <div className="bg-gradient-to-r from-amber-50 to-orange-50 rounded-2xl border border-amber-200/90 p-4 space-y-2">
+          <div className="flex items-start gap-3">
+            <div className="p-2 rounded-xl bg-amber-100 text-amber-800 shrink-0 mt-0.5">
+              <AlertCircle className="w-5 h-5" />
+            </div>
+            <div className="flex-1 space-y-1">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="font-bold text-xs text-amber-950 flex items-center gap-2">
+                  Client Folder Status in OneDrive: {activeClient.fullName || activeClient.name}
+                </h4>
+                <span className="px-2 py-0.5 rounded-full bg-amber-200/70 text-amber-900 font-mono text-[10px] font-bold">
+                  {folderProvisionResult?.mode === 'live' ? 'Live Cloud Sync Active' : 'Setup Required for Cloud Creation'}
+                </span>
+              </div>
+              <p className="text-xs text-amber-800 leading-relaxed">
+                If opening folder links in OneDrive displays <code className="bg-amber-100 px-1 py-0.5 rounded text-amber-950 font-mono text-[11px]">"Unknown render failure: This item isn't available"</code>, the folder has not yet been physically created in your cloud storage. Open your parent folder in OneDrive or use the 1-click setup guide.
+              </p>
+              <div className="pt-1 flex flex-wrap items-center gap-2">
+                <a
+                  href={formatOneDriveAppUrl(ONEDRIVE_DEFAULT_CONFIG.basePath)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0078D4] hover:bg-[#0060a8] text-white text-xs font-bold shadow-xs transition"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Open "Abhijith App Test" in OneDrive</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setIsFolderManagerOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                >
+                  <FolderTree className="w-3.5 h-3.5" />
+                  <span>1-Click Live Setup &amp; Fix Guide</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Client Dedicated Folder & 6 Subfolders Structure */}
         <div className="bg-slate-50/80 rounded-2xl border border-slate-200 p-4 space-y-3">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -524,9 +585,20 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-[11px] text-blue-700 hover:underline font-bold flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200"
-                title="Open Abhijith App Test folder in SharePoint"
+                title="Open Abhijith App Test folder directly in SharePoint"
               >
-                <span>Open in SharePoint</span>
+                <span>SharePoint</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+
+              <a
+                href={formatOneDriveAppUrl(ONEDRIVE_DEFAULT_CONFIG.basePath)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] text-[#0078D4] hover:underline font-bold flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200"
+                title="Open modern OneDrive web view"
+              >
+                <span>Modern OneDrive</span>
                 <ExternalLink className="w-3 h-3" />
               </a>
 
@@ -859,7 +931,11 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => setIsUploadModalOpen(false)}
+                onClick={() => {
+                  setIsUploading(false);
+                  setUploadProgressStatus(null);
+                  setIsUploadModalOpen(false);
+                }}
                 className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg text-sm cursor-pointer"
               >
                 ✕
@@ -904,7 +980,7 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
                       Drag and drop file here, or <span className="text-[#1A3A5C] underline">browse</span>
                     </p>
                     <p className="text-[10px] text-slate-400">
-                      Contracts, B&amp;P reports, bank pre-approvals, receipts (PDF, DOCX, PNG)
+                      Contracts, B&amp;P reports, bank pre-approvals, receipts (PDF, DOCX, PNG) • Upgraded to {MAX_UPLOAD_LIMIT_MB}MB
                     </p>
                   </div>
                 )}
@@ -1040,9 +1116,12 @@ export const ClientDocumentHub: React.FC<ClientDocumentHubProps> = ({
               <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
                 <button
                   type="button"
-                  disabled={isUploading}
-                  onClick={() => setIsUploadModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-medium text-slate-600 hover:bg-slate-100 cursor-pointer disabled:opacity-50"
+                  onClick={() => {
+                    setIsUploading(false);
+                    setUploadProgressStatus(null);
+                    setIsUploadModalOpen(false);
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-medium text-slate-600 hover:bg-slate-100 cursor-pointer"
                 >
                   Cancel
                 </button>
