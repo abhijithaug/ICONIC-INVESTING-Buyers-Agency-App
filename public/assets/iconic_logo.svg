@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="1000" height="1000">
+  <defs>
+    <linearGradient id="goldGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#D69F45" />
+      <stop offset="25%" stop-color="#CF9639" />
+      <stop offset="50%" stop-color="#C28628" />
+      <stop offset="80%" stop-color="#B2741E" />
+      <stop offset="100%" stop-color="#A56614" />
+    </linearGradient>
+
+    <!-- Clip path for top-left arc: x <= 438, y <= 468 -->
+    <clipPath id="clipTopLeft">
+      <rect x="0" y="0" width="438" height="468" />
+    </clipPath>
+
+    <!-- Clip path for top-right arc: x >= 562, y <= 468 -->
+    <clipPath id="clipTopRight">
+      <rect x="562" y="0" width="438" height="468" />
+    </clipPath>
+
+    <!-- Clip path for bottom-left arc: x <= 438, y >= 532 -->
+    <clipPath id="clipBottomLeft">
+      <rect x="0" y="532" width="438" height="468" />
+    </clipPath>
+
+    <!-- Clip path for bottom-right arc: x >= 562, y >= 532 -->
+    <clipPath id="clipBottomRight">
+      <rect x="562" y="532" width="438" height="468" />
+    </clipPath>
+
+    <!-- The Circular Ring -->
+    <path id="ring" fill-rule="evenodd" d="
+      M 500 340
+      A 160 160 0 1 0 500 660
+      A 160 160 0 1 0 500 340
+      Z
+      M 500 392
+      A 108 108 0 1 1 500 608
+      A 108 108 0 1 1 500 392
+      Z
+    " />
+  </defs>
+
+  <!-- Solid Black Background -->
+  <rect width="1000" height="1000" fill="#000000" />
+
+  <!-- Four Gold Ring Quadrants -->
+  <use href="#ring" fill="url(#goldGradient)" clip-path="url(#clipTopLeft)" />
+  <use href="#ring" fill="url(#goldGradient)" clip-path="url(#clipTopRight)" />
+  <use href="#ring" fill="url(#goldGradient)" clip-path="url(#clipBottomLeft)" />
+  <use href="#ring" fill="url(#goldGradient)" clip-path="url(#clipBottomRight)" />
+
+  <!-- The Two Vertical Pillars (II) -->
+  <!-- Top Left Pillar -->
+  <rect x="455" y="350" width="34" height="118" fill="url(#goldGradient)" />
+  <!-- Top Right Pillar -->
+  <rect x="511" y="350" width="34" height="118" fill="url(#goldGradient)" />
+
+  <!-- Bottom Left Pillar -->
+  <rect x="455" y="532" width="34" height="118" fill="url(#goldGradient)" />
+  <!-- Bottom Right Pillar -->
+  <rect x="511" y="532" width="34" height="118" fill="url(#goldGradient)" />
+
+  <!-- Typography: ICONIC INVESTING in White -->
+  <text 
+    x="500" 
+    y="512" 
+    fill="#FFFFFF" 
+    font-family="'Montserrat', 'Century Gothic', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" 
+    font-size="37" 
+    font-weight="600" 
+    letter-spacing="13.5" 
+    text-anchor="middle"
+  >ICONIC INVESTING</text>
+</svg>

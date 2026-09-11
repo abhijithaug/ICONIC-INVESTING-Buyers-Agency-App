@@ -1,6 +1,5 @@
 import React from 'react';
 import { 
-  Building2, 
   Search, 
   FileText, 
   TrendingUp, 
@@ -42,6 +41,7 @@ interface SidebarProps {
   currentUser: AuthUser;
   onLogout: () => void;
   documentCount?: number;
+  onOpenChangePassword?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -59,7 +59,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onResetData,
   currentUser,
   onLogout,
-  documentCount = 0
+  documentCount = 0,
+  onOpenChangePassword
 }) => {
   // Counters for dynamic badges
   const shortlistedCount = properties.filter(
@@ -98,6 +99,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: Users,
       badge: `${clients.length} Clients`,
       badgeColor: 'bg-[#B8960C] text-white font-semibold'
+    },
+    {
+      id: 'admin-management',
+      label: 'Admin Management',
+      description: 'Invite admins & user_roles RBAC',
+      icon: ShieldCheck,
+      badge: 'RBAC',
+      badgeColor: 'bg-emerald-600 text-white font-semibold'
     },
     {
       id: 'onboarding',
@@ -254,17 +263,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Top Header & Brand Identity */}
         <div className="p-5 border-b border-white/10 shrink-0">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#B8960C] via-[#9E8009] to-[#7B6205] flex items-center justify-center shadow-lg border border-amber-300/30">
-                <Building2 className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <div className="font-serif-heading font-bold text-base tracking-wider text-white flex items-center gap-1">
-                  ICONIC <span className="text-[#B8960C]">INVESTING</span>
-                </div>
-                <div className="text-[10px] tracking-widest uppercase text-amber-200/90 font-semibold font-sans">
-                  {isAdmin ? 'Buyers Agency App' : 'Client Investor App'}
-                </div>
+            <div className="flex flex-col gap-1.5">
+              <img
+                id="sidebar-company-logo"
+                src="https://jrpfkuwafvjkeelzzbhj.supabase.co/storage/v1/object/public/client-documents/assets/iconic_logo.png?v=2"
+                alt="Iconic Investing"
+                style={{ maxWidth: '160px', height: 'auto' }}
+                className="max-w-[160px] h-auto object-contain rounded-md shadow-xs"
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  const target = e.currentTarget;
+                  if (!target.dataset.fallback) {
+                    target.dataset.fallback = 'true';
+                    target.src = '/assets/iconic_logo.png';
+                  }
+                }}
+              />
+              <div className="text-[10px] tracking-widest uppercase text-amber-200/90 font-semibold font-sans">
+                Buyers Agency Portal
               </div>
             </div>
 
@@ -383,6 +399,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <Lock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
               <span>Verified Client Session (Read-Only Portal)</span>
             </div>
+          )}
+
+          {/* Change Password button (Available to all logged-in users) */}
+          {onOpenChangePassword && (
+            <button
+              id="sidebar-change-password-btn"
+              onClick={() => {
+                onOpenChangePassword();
+                onCloseMobile();
+              }}
+              className="w-full flex items-center justify-center gap-2 bg-[#1A3A5C]/90 hover:bg-[#224b75] text-amber-200 hover:text-white px-3 py-2 rounded-xl text-xs font-semibold border border-[#B8960C]/30 transition cursor-pointer shadow-xs"
+              title="Change your account password"
+            >
+              <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+              <span>Change Password</span>
+            </button>
           )}
 
           {/* User Sign Out button */}

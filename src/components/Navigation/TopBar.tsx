@@ -16,7 +16,8 @@ import {
   Wallet,
   LogOut,
   FolderOpen,
-  Folder
+  Folder,
+  KeyRound
 } from 'lucide-react';
 import { AppSection, ClientProfile, Property, AuthUser } from '../../types';
 
@@ -32,6 +33,7 @@ interface TopBarProps {
   currentUser: AuthUser;
   onLogout: () => void;
   onOpenOneDriveFolderManager?: () => void;
+  onOpenChangePassword?: () => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -45,17 +47,23 @@ export const TopBar: React.FC<TopBarProps> = ({
   onToggleMobileSidebar,
   currentUser,
   onLogout,
-  onOpenOneDriveFolderManager
+  onOpenOneDriveFolderManager,
+  onOpenChangePassword
 }) => {
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
   const isAdmin = currentUser.role === 'admin';
 
-  // Close dropdown on click outside
+  // Close dropdowns on click outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setClientDropdownOpen(false);
+      }
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
+        setProfileMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -78,6 +86,10 @@ export const TopBar: React.FC<TopBarProps> = ({
     'admin-panel': {
       title: 'Admin Control Panel & Client Permissions',
       subtitle: 'Manage client logins, credentials, documents & access rights'
+    },
+    'admin-management': {
+      title: 'Admin Management & Team Privileges',
+      subtitle: 'Invite new administrators, manage user_roles & access control'
     },
     onboarding: {
       title: 'Client Brief & Investment Mandate',
@@ -322,6 +334,84 @@ export const TopBar: React.FC<TopBarProps> = ({
                 <span>Add Property</span>
               </button>
             )}
+
+            {/* Change Password Button in TopBar (Available to all logged-in users) */}
+            {onOpenChangePassword && (
+              <button
+                id="topbar-change-password-btn"
+                type="button"
+                onClick={onOpenChangePassword}
+                className="flex items-center gap-1.5 bg-[#1A3A5C] hover:bg-[#234b75] text-amber-200 hover:text-white px-2.5 py-1.5 rounded-xl text-xs font-semibold border border-[#B8960C]/40 shadow-xs transition transform active:scale-95 cursor-pointer whitespace-nowrap"
+                title="Change your account password"
+              >
+                <KeyRound className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span className="hidden sm:inline">Change Password</span>
+              </button>
+            )}
+
+            {/* Profile Menu Dropdown (Available to all logged-in users) */}
+            <div className="relative" ref={profileMenuRef}>
+              <button
+                id="topbar-profile-menu-trigger"
+                type="button"
+                onClick={() => setProfileMenuOpen(!profileMenuOpen)}
+                className="flex items-center gap-1.5 p-1 pl-1.5 pr-2 rounded-xl bg-white/10 hover:bg-white/15 text-slate-200 hover:text-white border border-white/10 transition cursor-pointer"
+                title="Profile Menu & Account Security"
+              >
+                <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-[#B8960C] to-[#806708] flex items-center justify-center text-white font-bold text-[10px] shadow-xs">
+                  {currentUser.name.slice(0, 2).toUpperCase()}
+                </div>
+                <span className="text-xs font-semibold hidden md:inline truncate max-w-[100px]">
+                  {currentUser.name.split(' ')[0]}
+                </span>
+                <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform duration-150 ${profileMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {profileMenuOpen && (
+                <div className="absolute right-0 mt-2 w-64 bg-[#0E2238] rounded-xl shadow-2xl border border-slate-700 py-2 z-50 animate-in fade-in zoom-in-95 duration-100 text-left">
+                  <div className="px-3.5 py-2 border-b border-slate-700/80">
+                    <div className="font-bold text-xs text-white truncate">{currentUser.name}</div>
+                    <div className="text-[11px] text-slate-400 truncate">{currentUser.email}</div>
+                    <span className="inline-block mt-1 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#1A3A5C] text-amber-300 border border-amber-400/30">
+                      {currentUser.role === 'admin' ? 'Buyers Advocate (Admin)' : 'Investor Client'}
+                    </span>
+                  </div>
+
+                  <div className="py-1">
+                    {onOpenChangePassword && (
+                      <button
+                        id="topbar-profile-change-password-option"
+                        type="button"
+                        onClick={() => {
+                          setProfileMenuOpen(false);
+                          onOpenChangePassword();
+                        }}
+                        className="w-full text-left px-3.5 py-2.5 flex items-center gap-2.5 text-xs text-slate-200 hover:bg-[#1A3A5C] hover:text-amber-200 transition cursor-pointer"
+                      >
+                        <KeyRound className="w-4 h-4 text-amber-400 shrink-0" />
+                        <div className="flex-1">
+                          <div className="font-semibold text-white">Change Password</div>
+                          <div className="text-[10px] text-slate-400">Update Supabase login credentials</div>
+                        </div>
+                      </button>
+                    )}
+
+                    <button
+                      id="topbar-profile-logout-option"
+                      type="button"
+                      onClick={() => {
+                        setProfileMenuOpen(false);
+                        onLogout();
+                      }}
+                      className="w-full text-left px-3.5 py-2 flex items-center gap-2.5 text-xs text-rose-300 hover:bg-rose-500/10 hover:text-rose-200 transition cursor-pointer"
+                    >
+                      <LogOut className="w-4 h-4 shrink-0" />
+                      <span>Sign Out</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* 3. User Sign Out Button */}
             <button

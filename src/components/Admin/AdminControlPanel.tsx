@@ -42,7 +42,9 @@ import {
   FolderCheck,
   Folder,
   FolderTree,
-  Loader2
+  Loader2,
+  Database,
+  KeyRound
 } from 'lucide-react';
 import { uploadClientDocumentToSupabase } from '../../services/supabaseStorage';
 import { OneDriveFolderManagerModal } from '../Documents/OneDriveFolderManagerModal';
@@ -75,7 +77,10 @@ import {
   resendClientInvitation 
 } from '../../utils/invitations';
 import { EmailInviteModal } from './EmailInviteModal';
+import { InviteClientModal } from './InviteClientModal';
 import { SupabaseClientFilesSection } from '../Documents/SupabaseClientFilesSection';
+import { SupabaseUserRolesModal } from './SupabaseUserRolesModal';
+import { inviteClientUserByEmail, adminForceResetClientPassword } from '../../services/supabaseClient';
 
 interface AdminControlPanelProps {
   clients: ClientProfile[];
@@ -146,6 +151,7 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isDossierOpen, setIsDossierOpen] = useState(false);
   const [isOneDriveFolderModalOpen, setIsOneDriveFolderModalOpen] = useState(false);
+  const [isRolesModalOpen, setIsRolesModalOpen] = useState(false);
   const [revokeTargetClient, setRevokeTargetClient] = useState<ClientProfile | null>(null);
 
   // Selected client for Edit, Dossier, Upload, or OneDrive Folders
@@ -201,6 +207,48 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
       'Fresh Invitation Dispatched',
       `48-hour activation link renewed for ${client.name} (${client.email}).`
     );
+  };
+
+  // PROMPT 4: Supabase Auth Direct Client Invitation Modal
+  const [clientForDirectInviteModal, setClientForDirectInviteModal] = useState<ClientProfile | null>(null);
+  const [isDirectInviteModalOpen, setIsDirectInviteModalOpen] = useState(false);
+
+  const handleOpenDirectInviteModal = (client?: ClientProfile) => {
+    setClientForDirectInviteModal(client || null);
+    setIsDirectInviteModalOpen(true);
+  };
+
+  // PROMPT 7: Admin Force Reset Client Password
+  // Calls supabase.auth.admin.generateLink({ type: 'recovery', email: clientEmail })
+  const [resettingClientId, setResettingClientId] = useState<string | null>(null);
+  const [recentlyResetClients, setRecentlyResetClients] = useState<Record<string, string>>({});
+  const [lastResetSuccessAlert, setLastResetSuccessAlert] = useState<string | null>(null);
+
+  const handleForceResetClientPassword = async (client: ClientProfile) => {
+    if (resettingClientId) return;
+    const clientEmail = client.email;
+    setResettingClientId(client.id);
+    try {
+      console.log(`[AdminControlPanel] Triggering force reset for client ${client.name} (${clientEmail})...`);
+      const result = await adminForceResetClientPassword(clientEmail);
+      const successText = `Password reset email sent to ${clientEmail}`;
+      setRecentlyResetClients(prev => ({ ...prev, [client.id]: successText }));
+      setLastResetSuccessAlert(successText);
+      showToast(
+        successText,
+        'A secure password reset link was generated via supabase.auth.admin.generateLink and dispatched to the client.',
+        'success'
+      );
+    } catch (err: any) {
+      console.error('[AdminControlPanel] Failed to force reset password:', err);
+      showToast(
+        'Reset Failed',
+        err.message || `Failed to send password reset email to ${clientEmail}`,
+        'warn'
+      );
+    } finally {
+      setResettingClientId(null);
+    }
   };
 
   // Copy Feedback Notification
@@ -327,6 +375,22 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
 
           {/* Primary Action Buttons */}
           <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={() => onNavigate('admin-management')}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#B8960C] hover:bg-[#a0830a] text-white text-xs font-bold rounded-xl shadow-md transition-all border border-amber-400/40 cursor-pointer"
+              title="Open Admin Management: view all admins, invite admins via Supabase Auth, manage user_roles"
+            >
+              <ShieldCheck className="w-4 h-4 text-amber-100" />
+              Admin Management (Invite Admins)
+            </button>
+            <button
+              onClick={() => setIsRolesModalOpen(true)}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl shadow-md transition-all border border-emerald-500/30 cursor-pointer"
+              title="Manage user_roles and first admin in Supabase database"
+            >
+              <Database className="w-4 h-4 text-emerald-300" />
+              Supabase Roles (user_roles)
+            </button>
             <button
               onClick={() => setIsOneDriveFolderModalOpen(true)}
               className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#0078D4] hover:bg-[#006cbd] text-white text-xs font-bold rounded-xl shadow-md transition-all border border-blue-400/30"
@@ -520,6 +584,30 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
           </div>
         </div>
       </div>
+
+      {/* PROMPT 7: Password Reset Success Notification Banner */}
+      {lastResetSuccessAlert && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-2xl p-4 flex items-center justify-between shadow-xs animate-fadeIn">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+              <CheckCircle2 className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-emerald-900">{lastResetSuccessAlert}</p>
+              <p className="text-[11px] text-emerald-700 mt-0.5">
+                Password recovery link generated via <code className="font-mono font-bold bg-emerald-100/70 px-1 py-0.5 rounded">supabase.auth.admin.generateLink(&#123; type: 'recovery', email &#125;)</code> and dispatched automatically.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setLastResetSuccessAlert(null)}
+            className="p-1.5 text-emerald-600 hover:text-emerald-900 hover:bg-emerald-100 rounded-lg transition"
+            title="Dismiss"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Main Clients List Display */}
       {filteredClients.length === 0 ? (
@@ -728,6 +816,17 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
                       {/* Actions */}
                       <td className="py-4 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          {/* PROMPT 4: Invite Client via Supabase Auth */}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenDirectInviteModal(client)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-[11px] shadow-xs transition cursor-pointer"
+                            title="Invite Client: Dispatch Supabase password setup link & link in user_roles"
+                          >
+                            <Mail className="w-3.5 h-3.5" />
+                            <span>Invite Client</span>
+                          </button>
+
                           {/* Email Invitation Preview */}
                           <button
                             onClick={() => handleOpenEmailInviteModal(client)}
@@ -736,6 +835,26 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
                           >
                             <Mail className="w-4 h-4 text-[#B8960C]" />
                           </button>
+
+                          {/* PROMPT 7: Admin Force Reset Password button */}
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              id={`client-table-reset-password-${client.id}`}
+                              type="button"
+                              onClick={() => handleForceResetClientPassword(client)}
+                              disabled={resettingClientId === client.id}
+                              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300/80 rounded-lg text-[11px] font-bold transition shadow-2xs hover:shadow-xs disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                              title={`Force Reset Password for ${client.name} (${client.email}) via supabase.auth.admin.generateLink`}
+                            >
+                              <KeyRound className={`w-3.5 h-3.5 text-amber-600 shrink-0 ${resettingClientId === client.id ? 'animate-spin' : ''}`} />
+                              <span>{resettingClientId === client.id ? 'Sending...' : 'Reset Password'}</span>
+                            </button>
+                            {recentlyResetClients[client.id] && (
+                              <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md whitespace-nowrap">
+                                ✓ Reset Email Sent
+                              </span>
+                            )}
+                          </div>
 
                           {/* View Dossier */}
                           <button
@@ -927,6 +1046,25 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
                     >
                       <Mail className="w-4 h-4 text-[#B8960C]" />
                     </button>
+                    {/* PROMPT 7: Reset Password button */}
+                    <div className="inline-flex items-center gap-1">
+                      <button
+                        id={`client-card-reset-password-${client.id}`}
+                        type="button"
+                        onClick={() => handleForceResetClientPassword(client)}
+                        disabled={resettingClientId === client.id}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300/80 rounded-lg text-[11px] font-bold transition shadow-2xs hover:shadow-xs disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                        title={`Force Reset Password for ${client.name} (${client.email}) via supabase.auth.admin.generateLink`}
+                      >
+                        <KeyRound className={`w-3.5 h-3.5 text-amber-600 shrink-0 ${resettingClientId === client.id ? 'animate-spin' : ''}`} />
+                        <span>{resettingClientId === client.id ? 'Sending...' : 'Reset Password'}</span>
+                      </button>
+                      {recentlyResetClients[client.id] && (
+                        <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-md whitespace-nowrap">
+                          ✓ Sent
+                        </span>
+                      )}
+                    </div>
                     <button
                       onClick={() => {
                         setSelectedClientForEdit(client);
@@ -987,9 +1125,23 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
         <AddClientModal
           isOpen={isAddModalOpen}
           onClose={() => setIsAddModalOpen(false)}
-          onSave={(newClient, tempPassword, sendEmailInvite) => {
+          onSave={async (newClient, tempPassword, sendEmailInvite) => {
             onAddClient(newClient, tempPassword);
             setIsAddModalOpen(false);
+
+            // PROMPT 4: Dispatch Supabase Auth invitation via supabase.auth.admin.inviteUserByEmail and link in user_roles
+            try {
+              console.log(`[Supabase Admin Invite] Calling inviteClientUserByEmail for ${newClient.email} (clientId: ${newClient.id})...`);
+              const invResult = await inviteClientUserByEmail({
+                email: newClient.email,
+                clientId: newClient.id,
+                clientName: newClient.name,
+                phone: newClient.phone
+              });
+              console.log('[Supabase Admin Invite] Result:', invResult);
+            } catch (invErr) {
+              console.warn('[Supabase Admin Invite] Error dispatching invite:', invErr);
+            }
 
             if (sendEmailInvite !== false) {
               const invite = createClientInvitation({
@@ -1004,13 +1156,13 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
               setSelectedInviteForModal(invite);
               setIsEmailModalOpen(true);
               showToast(
-                'Email Invitation Dispatched (48h)',
-                `Invitation link sent to ${newClient.email}. Client can now set their own password.`
+                'Client Invitation Dispatched',
+                `Invitation link sent to ${newClient.email} via supabase.auth.admin. Registered in user_roles with role='client'.`
               );
             } else {
               showToast(
-                'Investor Provisioned Successfully',
-                `${newClient.name} is registered with login credentials (${newClient.email}).`
+                'Investor Provisioned & Linked',
+                `${newClient.name} (${newClient.email}) registered in user_roles with role='client'.`
               );
             }
           }}
@@ -1087,6 +1239,13 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
             setIsDossierOpen(false);
             setIsUploadModalOpen(true);
           }}
+          onInviteClient={() => {
+            handleOpenDirectInviteModal(selectedClientForDossier);
+          }}
+          onResetPassword={() => {
+            handleForceResetClientPassword(selectedClientForDossier);
+          }}
+          isResettingPassword={resettingClientId === selectedClientForDossier.id}
         />
       )}
 
@@ -1172,6 +1331,35 @@ export const AdminControlPanel: React.FC<AdminControlPanelProps> = ({
         onClose={() => setIsOneDriveFolderModalOpen(false)}
         clients={clients}
       />
+
+      {/* ========================================================================= */}
+      {/* 8. SUPABASE USER_ROLES RBAC MODAL */}
+      {/* ========================================================================= */}
+      <SupabaseUserRolesModal
+        isOpen={isRolesModalOpen}
+        onClose={() => setIsRolesModalOpen(false)}
+        clients={clients}
+      />
+
+      {/* ========================================================================= */}
+      {/* 9. PROMPT 4: SUPABASE AUTH CLIENT INVITATION MODAL */}
+      {/* ========================================================================= */}
+      {isDirectInviteModalOpen && (
+        <InviteClientModal
+          isOpen={isDirectInviteModalOpen}
+          onClose={() => {
+            setIsDirectInviteModalOpen(false);
+            setClientForDirectInviteModal(null);
+          }}
+          client={clientForDirectInviteModal}
+          onSuccess={(invitedEmail) => {
+            showToast(
+              'Client Invited to Dashboard',
+              `Invitation email dispatched to ${invitedEmail} via supabase.auth.admin. User linked in user_roles with role='client'.`
+            );
+          }}
+        />
+      )}
     </div>
   );
 };
@@ -1413,6 +1601,12 @@ const AddClientModal: React.FC<AddClientModalProps> = ({ isOpen, onClose, onSave
   const [smsfPurchase, setSmsfPurchase] = useState(false);
   const [assignedAgent, setAssignedAgent] = useState('Damian Sterling');
 
+  // PROMPT 4: Client invitation dialog state
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteEmailInput, setInviteEmailInput] = useState('');
+  const [isSendingInvite, setIsSendingInvite] = useState(false);
+  const [inviteFeedback, setInviteFeedback] = useState<{ success: boolean; message: string } | null>(null);
+
   const generateRandomPassword = () => {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!#$';
     let res = 'Inv#';
@@ -1423,6 +1617,38 @@ const AddClientModal: React.FC<AddClientModalProps> = ({ isOpen, onClose, onSave
   };
 
   const [formError, setFormError] = useState<string | null>(null);
+
+  const handleDirectInviteClient = async (targetEmail: string) => {
+    const clean = targetEmail.trim().toLowerCase();
+    if (!clean || !clean.includes('@')) {
+      setInviteFeedback({ success: false, message: 'Please enter a valid client email address.' });
+      return;
+    }
+    setIsSendingInvite(true);
+    setInviteFeedback(null);
+    try {
+      const cid = `client-${Date.now()}`;
+      const res = await inviteClientUserByEmail({
+        email: clean,
+        clientId: cid,
+        clientName: name.trim() || clean.split('@')[0],
+        phone: phone.trim()
+      });
+      if (res.success) {
+        setEmail(clean);
+        setInviteFeedback({
+          success: true,
+          message: `Invitation email dispatched via supabase.auth.admin.inviteUserByEmail to ${clean}! Account registered with role='client' and linked to client_id in user_roles and clients.`
+        });
+      } else {
+        setInviteFeedback({ success: false, message: res.message });
+      }
+    } catch (err: any) {
+      setInviteFeedback({ success: false, message: err.message || 'Failed to dispatch invitation.' });
+    } finally {
+      setIsSendingInvite(false);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1485,10 +1711,24 @@ const AddClientModal: React.FC<AddClientModalProps> = ({ isOpen, onClose, onSave
         <form onSubmit={handleSubmit} className="space-y-4 mt-4 text-xs">
           {/* Section A: Credentials & Identity */}
           <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-            <h4 className="font-bold text-slate-800 text-xs flex items-center gap-1.5 uppercase tracking-wider">
-              <Key className="w-3.5 h-3.5 text-[#B8960C]" />
-              1. Investor Credentials & Contact
-            </h4>
+            <div className="flex items-center justify-between">
+              <h4 className="font-bold text-slate-800 text-xs flex items-center gap-1.5 uppercase tracking-wider">
+                <Key className="w-3.5 h-3.5 text-[#B8960C]" />
+                1. Investor Credentials & Contact
+              </h4>
+              <button
+                type="button"
+                onClick={() => {
+                  setInviteEmailInput(email);
+                  setShowInviteModal(true);
+                }}
+                className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-[11px] rounded-lg flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+                title="Invite Client via Supabase Auth Admin (inviteUserByEmail)"
+              >
+                <Mail className="w-3 h-3" />
+                <span>Invite Client</span>
+              </button>
+            </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
@@ -1504,7 +1744,20 @@ const AddClientModal: React.FC<AddClientModalProps> = ({ isOpen, onClose, onSave
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1">Login Email Address *</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[11px] font-bold text-slate-700">Login Email Address *</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInviteEmailInput(email);
+                      setShowInviteModal(true);
+                    }}
+                    className="text-[10px] text-amber-700 font-bold hover:underline flex items-center gap-1"
+                  >
+                    <Mail className="w-2.5 h-2.5" />
+                    Invite Link
+                  </button>
+                </div>
                 <input
                   type="email"
                   required
@@ -1788,19 +2041,127 @@ const AddClientModal: React.FC<AddClientModalProps> = ({ isOpen, onClose, onSave
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors"
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors cursor-pointer"
             >
               Cancel
             </button>
             <button
+              type="button"
+              onClick={() => {
+                setInviteEmailInput(email);
+                setShowInviteModal(true);
+              }}
+              className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <Mail className="w-3.5 h-3.5" />
+              <span>Invite Client</span>
+            </button>
+            <button
               type="submit"
-              className="px-5 py-2 bg-[#B8960C] hover:bg-[#997B0A] text-white text-xs font-bold rounded-xl shadow transition-colors flex items-center gap-2"
+              className="px-5 py-2 bg-[#B8960C] hover:bg-[#997B0A] text-white text-xs font-bold rounded-xl shadow transition-colors flex items-center gap-2 cursor-pointer"
             >
               <Check className="w-4 h-4" />
               Provision Account & Save Mandate
             </button>
           </div>
         </form>
+
+        {/* PROMPT 4: Inline Invite Client Dialog */}
+        {showInviteModal && (
+          <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-900/70 backdrop-blur-xs p-4 animate-fadeIn">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-amber-100 text-[#B8960C] flex items-center justify-center">
+                    <Mail className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">Invite Client to Dashboard</h3>
+                    <p className="text-[10px] text-slate-500 font-mono">supabase.auth.admin.inviteUserByEmail</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowInviteModal(false)}
+                  className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="mt-3 p-3 bg-amber-50/80 rounded-xl border border-amber-200 text-[11px] text-amber-950 space-y-1.5">
+                <p className="font-semibold text-amber-900">
+                  Enter the client's email address below:
+                </p>
+                <p className="text-[10px] text-amber-900/80 leading-relaxed">
+                  The system will call <code className="bg-amber-100 px-1 py-0.5 rounded font-mono font-bold">supabase.auth.admin.inviteUserByEmail(email)</code> to send the client an invitation email with a link to set their own password.
+                </p>
+                <p className="text-[10px] text-amber-900/80 leading-relaxed">
+                  Once they set their password, they can log in and see only their own dashboard — property shortlist, uploaded documents, and settlement checklist — all in read-only mode. Their email will be inserted into <code className="bg-amber-100 px-1 py-0.5 rounded font-mono font-bold">user_roles</code> with role = 'client' and linked to their client_id in the clients table.
+                </p>
+              </div>
+
+              <div className="mt-3 space-y-3">
+                {inviteFeedback && (
+                  <div className={`p-2.5 rounded-lg text-xs flex items-start gap-2 ${
+                    inviteFeedback.success
+                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                      : 'bg-rose-50 text-rose-800 border border-rose-200'
+                  }`}>
+                    {inviteFeedback.success ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    )}
+                    <div className="text-[11px]">{inviteFeedback.message}</div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                    Client's Email Address *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={inviteEmailInput}
+                    onChange={(e) => setInviteEmailInput(e.target.value)}
+                    placeholder="e.g. client@example.com.au"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 font-medium text-xs focus:bg-white focus:ring-2 focus:ring-[#1A3A5C]/20"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setShowInviteModal(false)}
+                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition cursor-pointer"
+                  >
+                    Close
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSendingInvite}
+                    onClick={() => handleDirectInviteClient(inviteEmailInput)}
+                    className="px-4 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold rounded-lg shadow transition flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isSendingInvite ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Sending Invite...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-3.5 h-3.5" />
+                        <span>Send Invitation Email</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2381,6 +2742,9 @@ interface ClientDossierDrawerProps {
   onSwitchToClient: () => void;
   onEditProfile: () => void;
   onUploadDoc: () => void;
+  onInviteClient?: () => void;
+  onResetPassword?: () => void;
+  isResettingPassword?: boolean;
 }
 
 const ClientDossierDrawer: React.FC<ClientDossierDrawerProps> = ({
@@ -2395,7 +2759,10 @@ const ClientDossierDrawer: React.FC<ClientDossierDrawerProps> = ({
   onClose,
   onSwitchToClient,
   onEditProfile,
-  onUploadDoc
+  onUploadDoc,
+  onInviteClient,
+  onResetPassword,
+  isResettingPassword
 }) => {
   const isRevoked = client.accessStatus === 'revoked' || account?.status === 'revoked';
   const tempPass = client.tempPassword || account?.tempPassword || account?.password || 'client123';
@@ -2478,6 +2845,29 @@ Access URL: https://iconic-investing.com.au`;
                 <Upload className="w-3.5 h-3.5" />
                 Add Doc
               </button>
+              {onInviteClient && (
+                <button
+                  type="button"
+                  onClick={onInviteClient}
+                  className="py-2 px-3 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+                  title="Invite Client to Dashboard via Supabase Auth (inviteUserByEmail)"
+                >
+                  <Mail className="w-3.5 h-3.5" />
+                  Invite Client
+                </button>
+              )}
+              {onResetPassword && (
+                <button
+                  type="button"
+                  onClick={onResetPassword}
+                  disabled={isResettingPassword}
+                  className="py-2 px-3 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow-xs cursor-pointer disabled:opacity-50"
+                  title="Force Reset Client Password via supabase.auth.admin.generateLink"
+                >
+                  <KeyRound className={`w-3.5 h-3.5 text-amber-600 ${isResettingPassword ? 'animate-spin' : ''}`} />
+                  <span>{isResettingPassword ? 'Resetting...' : 'Reset Password'}</span>
+                </button>
+              )}
             </div>
 
             {/* 48-Hour Email Invitation & Portal Setup Status */}

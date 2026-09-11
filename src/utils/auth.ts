@@ -337,3 +337,32 @@ export async function verifyCurrentSession(): Promise<AuthUser | null> {
   setStoredUser(user);
   return user;
 }
+
+/**
+ * Update password in local stored accounts (v2)
+ */
+export function updateUserPassword(email: string, newPassword: string): boolean {
+  try {
+    const accounts = getStoredAccounts();
+    const cleanEmail = email.trim().toLowerCase();
+    let updated = false;
+    const newAccounts = accounts.map(acc => {
+      if (acc.email.toLowerCase() === cleanEmail) {
+        updated = true;
+        return {
+          ...acc,
+          password: newPassword,
+          tempPassword: newPassword
+        };
+      }
+      return acc;
+    });
+    if (updated) {
+      saveStoredAccounts(newAccounts);
+    }
+    return updated;
+  } catch (err) {
+    console.error('Failed to update user password in local storage', err);
+    return false;
+  }
+}

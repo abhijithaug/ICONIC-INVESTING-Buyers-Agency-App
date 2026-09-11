@@ -230,6 +230,12 @@ Certified in Iconic Investing Supabase Storage Vault (client-documents).
                 <CheckCircle2 className="w-3 h-3 text-emerald-400" />
                 <span>Pre-Approved ({client.preApprovalLender || 'Macquarie Bank'})</span>
               </span>
+              {currentUser.role === 'client' && (
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-400 text-slate-950 border border-amber-300 flex items-center gap-1 shadow-xs">
+                  <ShieldCheck className="w-3 h-3 text-slate-950" />
+                  <span>Read-Only Mode</span>
+                </span>
+              )}
             </div>
 
             <div className="flex items-center gap-3.5">
@@ -801,16 +807,27 @@ Certified in Iconic Investing Supabase Storage Vault (client-documents).
                   }`}
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <button
-                      type="button"
-                      onClick={() => onToggleTask && activeSettlement && onToggleTask(activeSettlement.id, task.id)}
-                      className={`w-4 h-4 rounded flex items-center justify-center cursor-pointer transition ${
-                        task.completed ? 'bg-emerald-600 text-white' : 'border border-slate-300 hover:border-slate-500'
-                      }`}
-                      title={task.completed ? 'Mark as incomplete' : 'Mark as complete'}
-                    >
-                      {task.completed && <Check className="w-3 h-3" />}
-                    </button>
+                    {currentUser.role === 'client' ? (
+                      <div
+                        className={`w-4 h-4 rounded flex items-center justify-center shrink-0 ${
+                          task.completed ? 'bg-emerald-600 text-white' : 'border border-slate-300 bg-slate-100 text-transparent'
+                        }`}
+                        title="Read-only: Advocate task checklist"
+                      >
+                        {task.completed && <Check className="w-3 h-3" />}
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => onToggleTask && activeSettlement && onToggleTask(activeSettlement.id, task.id)}
+                        className={`w-4 h-4 rounded flex items-center justify-center cursor-pointer transition shrink-0 ${
+                          task.completed ? 'bg-emerald-600 text-white' : 'border border-slate-300 hover:border-slate-500'
+                        }`}
+                        title={task.completed ? 'Mark as incomplete' : 'Mark as complete'}
+                      >
+                        {task.completed && <Check className="w-3 h-3" />}
+                      </button>
+                    )}
                     <span className={`truncate font-medium ${task.completed ? 'line-through text-slate-400' : 'text-slate-800'}`}>
                       {task.title}
                     </span>

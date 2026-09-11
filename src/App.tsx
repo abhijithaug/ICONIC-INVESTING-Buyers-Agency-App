@@ -14,13 +14,22 @@ import { CashflowModal } from './components/Modals/CashflowModal';
 import { NewPropertyModal } from './components/Modals/NewPropertyModal';
 import { LoginScreen } from './components/Auth/LoginScreen';
 import { SetPasswordScreen } from './components/Auth/SetPasswordScreen';
+import { ChangePasswordModal } from './components/Auth/ChangePasswordModal';
 import { ClientDocumentHub } from './components/Documents/ClientDocumentHub';
 import { OneDriveFolderManagerModal } from './components/Documents/OneDriveFolderManagerModal';
 import { AdminControlPanel } from './components/Admin/AdminControlPanel';
+import { AdminManagementSection } from './components/Admin/AdminManagementSection';
 import { ClientAgentMessaging } from './components/Messages/ClientAgentMessaging';
-import { Cloud, CheckCircle2, X, FolderCheck } from 'lucide-react';
+import { Cloud, CheckCircle2, X, FolderCheck, Building2 } from 'lucide-react';
 import { createClientOneDriveFolders, DEFAULT_CLIENT_SUBFOLDERS } from './services/oneDriveClient';
-import { supabase, testSupabaseConnection } from './services/supabaseClient';
+import { 
+  supabase, 
+  testSupabaseConnection, 
+  mapSupabaseUserToAuthUser, 
+  setupUserRolesSystem, 
+  checkUserRoleFromSupabase,
+  FIRST_ADMIN_EMAIL
+} from './services/supabaseClient';
 import { createClientSupabaseFolders } from './services/supabaseStorage';
 import { 
   MOCK_CLIENTS, 
@@ -79,10 +88,10 @@ function loadFromStorage<T>(key: string, fallback: T): T {
 }
 
 export default function App() {
-  // 0. Authentication & Session State (JWT-based)
+  // 0. Authentication & Session State (Supabase Auth)
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => getStoredUser());
   const [authToken, setAuthToken] = useState<string | null>(() => getStoredToken());
-  const [isVerifyingSession, setIsVerifyingSession] = useState<boolean>(false);
+  const [isVerifyingSession, setIsVerifyingSession] = useState<boolean>(true);
 
   // 0b. Token-based Invitation State (intercept ?token=... or #token=...)
   const [activeInviteToken, setActiveInviteToken] = useState<string | null>(() => {
@@ -179,6 +188,7 @@ export default function App() {
   const [cashflowModalProperty, setCashflowModalProperty] = useState<Property | null>(null);
   const [isNewPropertyModalOpen, setIsNewPropertyModalOpen] = useState<boolean>(false);
   const [isOneDriveFolderModalOpen, setIsOneDriveFolderModalOpen] = useState<boolean>(false);
+  const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState<boolean>(false);
 
   // Real-time Microsoft Graph OneDrive automated folder creation toast
   const [oneDriveToast, setOneDriveToast] = useState<{
@@ -190,30 +200,106 @@ export default function App() {
     mode: 'live' | 'simulated';
   } | null>(null);
 
-  // Verify JWT session on initial mount
+  // Automatically initialize user_roles system on setup & seed first admin: augustine.a@iconicinvesting.com.au
   useEffect(() => {
-    const token = getStoredToken();
-    if (token) {
-      setIsVerifyingSession(true);
-      verifyCurrentSession()
-        .then((user) => {
-          if (user) {
-            setCurrentUser(user);
+    setupUserRolesSystem().then(res => {
+      console.log('[Supabase Setup] user_roles table verification:', res.message);
+    });
+  }, []);
+
+  // Store session using supabase.auth.getSession() so the user stays logged in after refreshing the page
+  useEffect(() => {
+    let isMounted = true;
+    setIsVerifyingSession(true);
+
+    // Initial check: retrieve active session from Supabase
+    supabase.auth.getSession()
+      .then(async ({ data: { session }, error }) => {
+        if (!isMounted) return;
+        if (error) {
+          console.warn('[Supabase Auth] getSession error:', error.message);
+        }
+
+        if (session?.user) {
+          console.log('[Supabase Auth] Restored active session for:', session.user.email);
+          // Check role against Supabase user_roles table
+          const resolvedRole = await checkUserRoleFromSupabase(session.user.email || '');
+          const mapped = mapSupabaseUserToAuthUser(session.user, clients, resolvedRole);
+          setCurrentUser(mapped);
+          setAuthToken(session.access_token);
+          storeAuthSession(session.access_token, mapped);
+        } else {
+          // Fallback check to local session if present (for seamless testing/offline demo)
+          const storedUser = getStoredUser();
+          const storedToken = getStoredToken();
+          if (storedUser && storedToken) {
+            // Re-verify role against user_roles
+            checkUserRoleFromSupabase(storedUser.email).then(verifiedRole => {
+              if (isMounted) {
+                const updatedUser = { ...storedUser, role: verifiedRole };
+                setCurrentUser(updatedUser);
+                setAuthToken(storedToken);
+              }
+            });
           } else {
-            // Invalid or expired JWT
-            clearAuthSession();
             setCurrentUser(null);
             setAuthToken(null);
           }
-        })
-        .catch(() => {
-          // Token verification error
-        })
-        .finally(() => {
+        }
+      })
+      .catch((err) => {
+        console.warn('[Supabase Auth] getSession catch:', err);
+      })
+      .finally(() => {
+        if (isMounted) {
           setIsVerifyingSession(false);
-        });
-    }
+        }
+      });
+
+    // Listen for auth changes (sign in, sign out, token refresh)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('[Supabase Auth] Event:', event, session?.user?.email);
+      if (!isMounted) return;
+
+      if (session?.user) {
+        // Query user_roles table to determine their role upon login
+        const resolvedRole = await checkUserRoleFromSupabase(session.user.email || '');
+        console.log(`[Supabase Auth] Role resolved from user_roles for ${session.user.email}: ${resolvedRole}`);
+        const mapped = mapSupabaseUserToAuthUser(session.user, clients, resolvedRole);
+        setCurrentUser(mapped);
+        setAuthToken(session.access_token);
+        storeAuthSession(session.access_token, mapped);
+      } else if (event === 'SIGNED_OUT') {
+        clearAuthSession();
+        setCurrentUser(null);
+        setAuthToken(null);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
+
+  // Enforce role boundary: If client, redirect from admin sections to dashboard
+  useEffect(() => {
+    if (currentUser && currentUser.role === 'client') {
+      const adminOnlySections: AppSection[] = [
+        'admin-panel', 
+        'admin-management',
+        'onboarding', 
+        'analyser', 
+        'market', 
+        'report', 
+        'negotiation'
+      ];
+      if (adminOnlySections.includes(currentSection)) {
+        console.log(`[Role Security] Client ${currentUser.email} restricted from ${currentSection}. Redirecting to dashboard.`);
+        setCurrentSection('dashboard');
+      }
+    }
+  }, [currentUser, currentSection]);
 
   // Supabase Storage connection test on page load
   useEffect(() => {
@@ -366,7 +452,12 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.warn('[Supabase Auth] Error during signOut:', err);
+    }
     clearAuthSession();
     setCurrentUser(null);
     setAuthToken(null);
@@ -849,12 +940,33 @@ export default function App() {
     );
   }
 
+  // Loading screen while verifying initial Supabase Auth session
+  if (isVerifyingSession) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-[#0B1A2C] via-[#0E2238] to-[#1A3A5C] flex flex-col items-center justify-center py-10 px-4 text-white">
+        <div className="flex flex-col items-center gap-4 text-center max-w-sm">
+          <div className="p-3.5 rounded-2xl bg-gradient-to-br from-[#B8960C] via-[#9E8009] to-[#7B6205] shadow-2xl border border-amber-300/40 animate-pulse">
+            <Building2 className="w-8 h-8 text-white" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold font-serif-heading tracking-wide text-white">
+              ICONIC <span className="text-[#B8960C]">INVESTING</span>
+            </h1>
+            <p className="text-xs text-slate-300 mt-1">Connecting to Supabase Authentication...</p>
+          </div>
+          <div className="w-6 h-6 border-2 border-[#B8960C] border-t-transparent rounded-full animate-spin mt-2" />
+        </div>
+      </div>
+    );
+  }
+
   // If user is not authenticated, display Role-Based Login Screen
   if (!currentUser) {
     return (
       <LoginScreen
         onLoginSuccess={handleLoginSuccess}
         onOpenInviteToken={(token) => setActiveInviteToken(token)}
+        clients={clients}
       />
     );
   }
@@ -885,6 +997,7 @@ export default function App() {
         currentUser={currentUser}
         onLogout={handleLogout}
         documentCount={userVisibleDocumentCount}
+        onOpenChangePassword={() => setIsChangePasswordModalOpen(true)}
       />
 
       {/* 2. MAIN APP SHELL (offset by sidebar width on desktop) */}
@@ -907,6 +1020,7 @@ export default function App() {
           currentUser={currentUser}
           onLogout={handleLogout}
           onOpenOneDriveFolderManager={() => setIsOneDriveFolderModalOpen(true)}
+          onOpenChangePassword={() => setIsChangePasswordModalOpen(true)}
         />
 
         {/* Dynamic Section Content Container */}
@@ -949,6 +1063,14 @@ export default function App() {
               onRestoreAccess={handleRestoreClientAccess}
               onUploadDocument={handleAddDocument}
               onOpenInviteToken={(token) => setActiveInviteToken(token)}
+            />
+          )}
+
+          {/* Section: Admin Management (Admin Only - View Admins, Invite via Supabase Auth Admin, Remove Admin Access) */}
+          {currentSection === 'admin-management' && isAdmin && (
+            <AdminManagementSection
+              currentUser={currentUser}
+              onNavigateSection={handleNavigate}
             />
           )}
 
@@ -1093,6 +1215,18 @@ export default function App() {
           onClose={() => setIsOneDriveFolderModalOpen(false)}
           clients={clients}
         />
+
+        {currentUser && (
+          <ChangePasswordModal
+            isOpen={isChangePasswordModalOpen}
+            onClose={() => setIsChangePasswordModalOpen(false)}
+            currentUser={currentUser}
+            onSuccessLogout={() => {
+              setIsChangePasswordModalOpen(false);
+              handleLogout();
+            }}
+          />
+        )}
 
         {/* OneDrive Automated Folder Creation Toast */}
         {oneDriveToast && (

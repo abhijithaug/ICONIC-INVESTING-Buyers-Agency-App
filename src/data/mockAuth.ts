@@ -18,14 +18,26 @@ export interface UserAccount {
 
 export const SEED_ACCOUNTS: UserAccount[] = [
   {
+    id: 'usr-admin-0',
+    email: 'augustine.a@iconicinvesting.com.au',
+    password: 'Password123!',
+    name: 'Augustine A',
+    role: 'admin',
+    agencyTitle: 'Principal Buyers Advocate & Licensee',
+    phone: '+61 419 552 100',
+    avatarUrl: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&w=200&q=80',
+    status: 'active',
+    createdAt: '2026-01-01'
+  },
+  {
     id: 'usr-admin-1',
     email: 'admin@iconicinvesting.com.au',
     password: 'admin', // also accept admin123
     name: 'Damian Sterling',
     role: 'admin',
-    agencyTitle: 'Principal Buyers Advocate & Licensee',
-    phone: '+61 419 552 100',
-    avatarUrl: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&w=200&q=80',
+    agencyTitle: 'Senior Buyers Advocate',
+    phone: '+61 419 552 101',
+    avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80',
     status: 'active',
     createdAt: '2026-01-15'
   },
@@ -84,6 +96,13 @@ export const SEED_ACCOUNTS: UserAccount[] = [
 ];
 
 export const DEMO_CREDENTIALS = [
+  {
+    label: 'Augustine A (First Admin)',
+    role: 'admin' as const,
+    email: 'augustine.a@iconicinvesting.com.au',
+    password: 'Password123!',
+    description: 'First Administrator in Supabase user_roles: full agency portal access'
+  },
   {
     label: 'Buyers Advocate (Admin)',
     role: 'admin' as const,

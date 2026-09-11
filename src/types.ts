@@ -1,6 +1,7 @@
 export type AppSection = 
   | 'dashboard'
   | 'admin-panel'
+  | 'admin-management'
   | 'onboarding'
   | 'search'
   | 'analyser'
@@ -12,6 +13,14 @@ export type AppSection =
   | 'messages';
 
 export type UserRole = 'admin' | 'client';
+
+export interface UserRoleRecord {
+  id?: string;
+  email: string;
+  role: 'admin' | 'client';
+  client_id?: number | string | null;
+  created_at?: string;
+}
 
 export interface AuthUser {
   id: string;
